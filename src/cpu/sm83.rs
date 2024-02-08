@@ -34,7 +34,7 @@ impl SM83 {
     // write-only IME flag (handles interrupts)
     // returns the number of clock M-cycles
     pub fn fetch_execute(&mut self) -> u8 {
-        let opcode = self.memory[self.PC()];
+        let opcode = self.memory[self.r16("PC")];
 
         // executes instruction and returns number of clock cycles
         match opcode {
@@ -42,70 +42,70 @@ impl SM83 {
             0x00 => 1,
             0x01 => 1,
             0x02 => 1,
-            0x03 => 1,
-            0x04 => 1,
-            0x05 => 1,
+            0x03 => self.inc_r16("BC"),
+            0x04 => self.inc_r8("B"),
+            0x05 => self.dec_r8("B"),
             0x06 => 1,
             0x07 => 1,
             0x08 => 1,
             0x09 => self.add_hl_r16(self.BC()),
             0x0A => 1,
-            0x0B => 1,
-            0x0C => 1,
-            0x0D => 1,  
+            0x0B => self.dec_r16("BC"),
+            0x0C => self.inc_r8("C"),
+            0x0D => self.dec_r8("C"),
             0x0E => 1,
             0x0F => 1,
 
             0x10 => 1,
             0x11 => 1,
             0x12 => 1,
-            0x13 => 1,
-            0x14 => 1,
-            0x15 => 1,
+            0x13 => self.inc_r16("DE"),
+            0x14 => self.inc_r8("D"),
+            0x15 => self.dec_r8("D"),
             0x16 => 1,
             0x17 => 1,
             0x18 => 1,
-            0x19 => self.add_hl_r16(self.DE()),
+            0x19 => self.add_hl_r16(self.r16("DE")),
             0x1A => 1,
-            0x1B => 1,
-            0x1C => 1,
-            0x1D => 1, 
+            0x1B => self.dec_r16("DE"),
+            0x1C => self.inc_r8("E"),
+            0x1D => self.dec_r8("E"), 
             0x1E => 1,
             0x1F => 1,
 
             0x20 => 1,
             0x21 => 1,
             0x22 => 1,
-            0x23 => 1,
-            0x24 => 1,
-            0x25 => 1,
+            0x23 => self.inc_r16("HL"),
+            0x24 => self.inc_r8("H"),
+            0x25 => self.dec_r8("H"),
             0x26 => 1,
-            0x27 => 1,
+            0x27 => self.daa(),
             0x28 => 1,
             0x29 => self.add_hl_r16(self.HL()),
             0x2A => 1,
-            0x2B => 1,
-            0x2C => 1,
-            0x2D => 1,
+            0x2B => self.dec_r16("HL"),
+            0x2C => self.inc_r8("L"),
+            0x2D => self.dec_r8("L"),
             0x2E => 1,
-            0x2F => 1,
+            0x2F => self.cpl(),
             
             0x30 => 1,
             0x31 => 1,
             0x32 => 1,
-            0x33 => 1,
-            0x34 => 1,
-            0x35 => 1,
+            0x33 => self.inc_r16("SP"),
+            0x34 => self.inc_hl(),
+            0x35 => self.dec_hl(),
             0x36 => 1,
-            0x37 => 1,
+            0x37 => self.scf(),
             0x38 => 1,
             0x39 => self.add_hl_r16(self.SP()),
             0x3A => 1,
-            0x3B => 1,
-            0x3C => 1,
-            0x3D => 1,
+            0x3B => self.dec_r16("SP"),
+            0x3C => self.inc_r8("A"),
+            0x3D => self.dec_r8("A"),
             0x3E => 1,
-            0x3F => 1,
+            0x3F => self.ccf(),
 
             0x40 => 1,
             0x41 => 1,
@@ -312,6 +312,96 @@ impl SM83 {
             0xFF => 1,
             _ => 0
         }
+    }
+
+    fn daa(&mut self) -> u8 {
+        let a = self.A();
+        let mut adjust = 0x00;
+        if self.cflag() { adjust |= 0x60; };
+        if self.hflag() { adjust |= 0x06; };
+        
+        let res =
+            if self.nflag() {
+                a.wrapping_sub(adjust)
+            } else {
+                if a > 0x99 { adjust |= 0x60; };
+                if a & 0x0F > 0x09 { adjust |= 0x06; };
+                a.wrapping_add(adjust)
+            };
+        
+        self.set_A(res);
+        self.set_all_flags(res == 0, self.nflag(), false, adjust & 0x60 != 0);
+        self.inc_PC(1);
+        1
+    }
+
+    fn cpl(&mut self) -> u8 {
+        self.set_A(!self.A());
+        self.set_all_flags(self.zflag(), true, true, self.cflag());
+        self.inc_PC(1);
+        1
+    }
+
+    fn scf(&mut self) -> u8 {
+        self.set_all_flags(self.zflag(), false, false, true);
+        self.inc_PC(1);
+        1
+    }
+
+    fn ccf(&mut self) -> u8 {
+        self.set_all_flags(self.zflag(), false, false, !self.cflag());
+        self.inc_PC(1);
+        1
+    }
+
+    fn dec_r8(&mut self, r8_name: &str) -> u8 {
+        let r8 = self.r8(r8_name);
+        let res = r8.wrapping_sub(1);
+        self.set_all_flags(res == 0, true, ((r8 & 0xf) - 1) & 0x10 > 0, self.flag("C"));
+        self.set_r8(r8_name, res);
+        self.inc_PC(1);
+        1
+    }
+
+    fn dec_hl(&mut self) -> u8 {
+        let hl = self.get_memory(self.r16("HL"));
+        let res = hl.wrapping_sub(1);
+        self.set_all_flags(res == 0, true, ((hl & 0xf) - 1) & 0x10 > 0, self.flag("C"));
+        self.set_memory(self.r16("HL"), res);
+        self.inc_PC(1);
+        3
+    }
+
+    fn dec_r16(&mut self, r16_name: &str) -> u8 {
+        let r16 = self.r16(r16_name);
+        self.set_r16(r16_name, r16.wrapping_add(1));
+        self.inc_PC(1);
+        2
+    }
+
+    fn inc_r8(&mut self, r8_name: &str) -> u8 {
+        let r8 = self.r8(r8_name);
+        let res = r8.wrapping_add(1);
+        self.set_all_flags(res == 0, false, ((r8 & 0xF) + 1) & 0x10 > 0, self.flag("C"));
+        self.set_r8(r8_name, res);
+        self.inc_PC(1);
+        1
+    }
+
+    fn inc_hl(&mut self) -> u8 {
+        let hl = self.get_memory(self.r16("HL"));
+        let res = hl.wrapping_add(1);
+        self.set_all_flags(res == 0, false, ((hl & 0xF) + 1) & 0x10 > 0, self.flag("C"));
+        self.set_memory(self.r16("HL"), res);
+        self.inc_PC(1);
+        3
+    }
+
+    fn inc_r16(&mut self, r16_name: &str) -> u8 {
+        let r16 = self.r16(r16_name);
+        self.set_r16(r16_name, r16.wrapping_add(1));
+        self.inc_PC(1);
+        2
     }
 
     fn xor_a_r8(&mut self, r8: u8) -> u8 {
@@ -572,18 +662,87 @@ impl SM83 {
         self.memory[address] = val;
     }
 
-    fn set_all_flags(&mut self, z: bool, h: bool, n: bool, c: bool) {
+    fn set_all_flags(&mut self, z: bool, n: bool, h: bool, c: bool) {
         self.set_zflag(z);
-        self.set_hflag(h);
         self.set_nflag(n);
+        self.set_hflag(h);
         self.set_cflag(c)
     }
 
     // Condition Codes
-    fn cc_Z(&self) -> bool {  self.zflag() }
-    fn cc_NZ(&self) -> bool { !self.zflag() }
-    fn cc_C(&self) -> bool {  self.cflag() }
-    fn cc_NC(&self) -> bool { !self.cflag() }
+    fn cc_Z(&self) -> bool {  self.flag("Z") }
+    fn cc_NZ(&self) -> bool { !self.flag("Z") }
+    fn cc_C(&self) -> bool {  self.flag("C") }
+    fn cc_NC(&self) -> bool { !self.flag("C") }
+
+    // Register and Flag Getters
+    fn r8(&self, name: &str) -> u8 {
+        match name {
+            "A" => { self.AF.hi() },
+            "B" => { self.BC.hi() },
+            "C" => { self.AF.lo() },
+            "D" => { self.AF.hi() },
+            "E" => { self.AF.lo() }
+            "H" => { self.AF.hi() },
+            "L" => { self.AF.lo() }
+            _ => 0
+        }
+    }
+
+    fn r16(&self, name: &str) -> usize {
+        match name {
+            "DE" => { self.DE.full() },
+            "HL" => { self.HL.full() },
+            "PC" => { self.PC.full() },
+            "SP" => { self.SP.full() },
+            _ => 0
+        }
+    }
+
+    fn flag(&self, name: &str) -> bool {
+        match name {
+            "Z" => { self.AF.bit(7) },
+            "N" => { self.AF.bit(6) },
+            "H" => { self.AF.bit(5) },
+            "C" => { self.AF.bit(4) },
+            _ => false
+        }
+    }
+
+
+    // Register and Flag Setters
+    fn set_r8(&mut self, name: &str, val: u8) {
+        match name {
+            "A" => { self.AF.set_hi(val) },
+            "B" => { self.BC.set_hi(val) },
+            "C" => { self.AF.set_lo(val) },
+            "D" => { self.AF.set_hi(val) },
+            "E" => { self.AF.set_lo(val) }
+            "H" => { self.AF.set_hi(val) },
+            "L" => { self.AF.set_lo(val) }
+            _ => {}
+        }
+    }
+
+    fn set_r16(&mut self, name: &str, val: usize) {
+        match name {
+            "DE" => { self.DE.set(val) },
+            "HL" => { self.HL.set(val) },
+            "PC" => { self.PC.set(val) },
+            "SP" => { self.SP.set(val) },
+            _ => {}
+        }
+    }
+
+    fn set_flag(&mut self, name: &str, val: bool) {
+        match name {
+            "Z" => { self.AF.set_bit(7, val); },
+            "N" => { self.AF.set_bit(6, val); },
+            "H" => { self.AF.set_bit(5, val); },
+            "C" => { self.AF.set_bit(4, val); },
+            _ => {}
+        }
+    }
 
     // Register and Flag Getters
     fn A(&self) -> u8 { self.AF.hi() }
