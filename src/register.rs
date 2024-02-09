@@ -22,11 +22,11 @@ impl Register {
     }
 
     pub fn set_hi(&mut self, val: u8) {
-        self.0 = ((val << 8) + self.lo()) as usize;
+        self.0 = ((val as usize) << 8) + self.lo() as usize;
     }
 
     pub fn set_lo(&mut self, val: u8) {
-        self.0 = ((self.hi() << 8) + val) as usize;
+        self.0 = ((self.hi() as usize) << 8) + val as usize;
     }
 
     pub fn set_bit(&mut self, k: usize, val: bool) {

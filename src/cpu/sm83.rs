@@ -43,7 +43,7 @@ impl SM83 {
             0x04 => self.inc_r8("B"),
             0x05 => self.dec_r8("B"),
             0x06 => self.ld_r8_n8("B"),
-            0x07 => 0,
+            0x07 => self.rlca(),
             0x08 => self.ld_n16_sp(),
             0x09 => self.add_hl_r16(self.BC()),
             0x0A => self.ld_a_r16("BC"),
@@ -51,7 +51,7 @@ impl SM83 {
             0x0C => self.inc_r8("C"),
             0x0D => self.dec_r8("C"),
             0x0E => self.ld_r8_n8("C"),
-            0x0F => 0,
+            0x0F => self.rrca(),
 
             0x10 => self.stop(),
             0x11 => self.ld_r16_n16("DE"),
@@ -60,7 +60,7 @@ impl SM83 {
             0x14 => self.inc_r8("D"),
             0x15 => self.dec_r8("D"),
             0x16 => self.ld_r8_n8("D"),
-            0x17 => 0,
+            0x17 => self.rla(),
             0x18 => self.jr_e8(),
             0x19 => self.add_hl_r16(self.DE()),
             0x1A => self.ld_a_r16("DE"),
@@ -68,7 +68,7 @@ impl SM83 {
             0x1C => self.inc_r8("E"),
             0x1D => self.dec_r8("E"), 
             0x1E => self.ld_r8_n8("E"),
-            0x1F => 0,
+            0x1F => self.rra(),
 
             0x20 => self.jr_cc_e8(self.cc_NZ()),
             0x21 => self.ld_r16_n16("HL"),
@@ -346,6 +346,38 @@ impl SM83 {
         4
     }
 
+    fn rlca(&mut self) -> u8 {
+        let res = self.rlc_and_set_flags(self.A());
+        self.set_A(res);
+        self.set_zflag(false);
+        self.inc_PC(1);
+        1
+    }
+
+    fn rla(&mut self) -> u8 {
+        let res = self.rl_and_set_flags(self.A());
+        self.set_A(res);
+        self.set_zflag(false);
+        self.inc_PC(1);
+        1
+    }
+
+    fn rrca(&mut self) -> u8 {
+        let res = self.rrc_and_set_flags(self.A());
+        self.set_A(res);
+        self.set_zflag(false);
+        self.inc_PC(1);
+        1
+    }
+
+    fn rra(&mut self) -> u8 {
+        let res = self.rr_and_set_flags(self.A());
+        self.set_A(res);
+        self.set_zflag(false);
+        self.inc_PC(1);
+        1
+    }
+
     fn jp_n16(&mut self) -> u8 {
         self.set_PC(self.n16());
         4
@@ -464,16 +496,16 @@ impl SM83 {
         3
     }
 
-    fn ld_hl_r8(&mut self, r8_name: &str) -> u8{
-        self.set_memory(self.HL(), self.r8(r8_name));
-        self.inc_PC(1);
-        2
-    }
-
     fn ld_hl_n8(&mut self) -> u8{
         self.set_memory(self.HL(), self.n8());
         self.inc_PC(2);
         3
+    }
+
+    fn ld_hl_r8(&mut self, r8_name: &str) -> u8{
+        self.set_memory(self.HL(), self.r8(r8_name));
+        self.inc_PC(1);
+        2
     }
 
     fn ld_r8_hl(&mut self, r8_name: &str) -> u8 {
@@ -489,17 +521,17 @@ impl SM83 {
         2
     }
 
-    fn ld_n16_a(&mut self) -> u8 {
-        self.set_memory(self.n16(), self.A());
-        self.inc_PC(3);
-        4
-    }
-
     fn ld_a_r16(&mut self, r16_name: &str) -> u8 {
         let r16 = self.get_memory(self.r16(r16_name));
         self.set_A(r16);
         self.inc_PC(1);
         2
+    }
+
+    fn ld_n16_a(&mut self) -> u8 {
+        self.set_memory(self.n16(), self.A());
+        self.inc_PC(3);
+        4
     }
 
     fn ld_a_n16(&mut self) -> u8 {
@@ -550,12 +582,8 @@ impl SM83 {
     }
 
     fn ld_hl_sp_e8(&mut self) -> u8 {
-        let sp = self.SP() as i32;
-        let e8 = self.e8() as i32;
-        let res = sp.wrapping_add(e8);
-        // TODO
-        self.set_all_flags(false, false, (sp ^ e8 ^ res) & 0x10 != 0, (sp ^ e8 ^ res) & 0x100 != 0);
-        self.set_HL(res as usize);
+        let res = self.sp_offset_and_set_flags();
+        self.set_HL(res);
         self.inc_PC(2);
         3
     }
@@ -573,18 +601,18 @@ impl SM83 {
         3
     }
 
-    fn ldh_c_a(&mut self) -> u8 {
-        let c = 0xFF00 | self.C() as usize;
-        self.set_memory(c, self.A());
-        self.inc_PC(1);
-        2
-    }
-
     fn ldh_a_n16(&mut self) -> u8 {
         let n16 = 0xFF00 | self.n8() as usize;
         self.set_A(self.get_memory(n16));
         self.inc_PC(2);
         3
+    }
+
+    fn ldh_c_a(&mut self) -> u8 {
+        let c = 0xFF00 | self.C() as usize;
+        self.set_memory(c, self.A());
+        self.inc_PC(1);
+        2
     }
 
     fn ldh_a_c(&mut self) -> u8 {
@@ -859,14 +887,19 @@ impl SM83 {
     }
 
     fn add_sp_e8(&mut self) -> u8 {
+        let res = self.sp_offset_and_set_flags();
+        self.set_SP(res);
+        self.inc_PC(2);
+        4
+    }
+
+    // TODO
+    fn sp_offset_and_set_flags(&mut self) -> usize {
         let sp = self.SP() as i32;
         let e8 = self.e8() as i32;
         let res = sp.wrapping_add(e8);
-        // TODO
         self.set_all_flags(false, false, (sp ^ e8 ^ res) & 0x10 != 0, (sp ^ e8 ^ res) & 0x100 != 0);
-        self.set_SP(res as usize);
-        self.inc_PC(2);
-        4
+        res as usize
     }
 
     fn adc_a_r8(&mut self, r8: u8) -> u8 {
@@ -917,286 +950,460 @@ impl SM83 {
         let opcode = self.memory[self.PC().wrapping_add(1)];
 
         match opcode {
-            // replace all 1 answers with a '{}' like 0x00 and 0x01 and 0x02
-            0x00 => {},
-            0x01 => {},
-            0x02 => {},
-            0x03 => {},
-            0x04 => {},
-            0x05 => {},
-            0x06 => {},
-            0x07 => {},
-            0x08 => {},
-            0x09 => {},
-            0x0A => {},
-            0x0B => {},
-            0x0C => {},
-            0x0D => {},  
-            0x0E => {},
-            0x0F => {},
+            0x00 => self.rlc_r8("B"),
+            0x01 => self.rlc_r8("C"),
+            0x02 => self.rlc_r8("D"),
+            0x03 => self.rlc_r8("E"),
+            0x04 => self.rlc_r8("H"),
+            0x05 => self.rlc_r8("L"),
+            0x06 => self.rlc_hl(),
+            0x07 => self.rlc_r8("A"),
+            0x08 => self.rrc_r8("B"),
+            0x09 => self.rrc_r8("C"),
+            0x0A => self.rrc_r8("D"),
+            0x0B => self.rrc_r8("E"),
+            0x0C => self.rrc_r8("H"),
+            0x0D => self.rrc_r8("L"),  
+            0x0E => self.rrc_hl(),
+            0x0F => self.rrc_r8("A"),
 
-            0x10 => {},
-            0x11 => {},
-            0x12 => {},
-            0x13 => {},
-            0x14 => {},
-            0x15 => {},
-            0x16 => {},
-            0x17 => {},
-            0x18 => {},
-            0x19 => {},
-            0x1A => {},
-            0x1B => {},
-            0x1C => {},
-            0x1D => {}, 
-            0x1E => {},
-            0x1F => {},
+            0x10 => self.rl_r8("B"),
+            0x11 => self.rl_r8("C"),
+            0x12 => self.rl_r8("D"),
+            0x13 => self.rl_r8("E"),
+            0x14 => self.rl_r8("H"),
+            0x15 => self.rl_r8("L"),
+            0x16 => self.rl_hl(),
+            0x17 => self.rl_r8("A"),
+            0x18 => self.rr_r8("B"),
+            0x19 => self.rr_r8("C"),
+            0x1A => self.rr_r8("D"),
+            0x1B => self.rr_r8("E"),
+            0x1C => self.rr_r8("H"),
+            0x1D => self.rr_r8("L"), 
+            0x1E => self.rr_hl(),
+            0x1F => self.rr_r8("A"),
 
-            0x20 => {},
-            0x21 => {},
-            0x22 => {},
-            0x23 => {},
-            0x24 => {},
-            0x25 => {},
-            0x26 => {},
-            0x27 => {},
-            0x28 => {},
-            0x29 => {},
-            0x2A => {},
-            0x2B => {},
-            0x2C => {},
-            0x2D => {},
-            0x2E => {},
-            0x2F => {},
+            0x20 => self.sla_r8("B"),
+            0x21 => self.sla_r8("C"),
+            0x22 => self.sla_r8("D"),
+            0x23 => self.sla_r8("E"),
+            0x24 => self.sla_r8("H"),
+            0x25 => self.sla_r8("L"),
+            0x26 => self.sla_hl(),
+            0x27 => self.sla_r8("A"),
+            0x28 => self.sra_r8("B"),
+            0x29 => self.sra_r8("C"),
+            0x2A => self.sra_r8("D"),
+            0x2B => self.sra_r8("E"),
+            0x2C => self.sra_r8("H"),
+            0x2D => self.sra_r8("L"),
+            0x2E => self.sra_hl(),
+            0x2F => self.sra_r8("A"),
             
-            0x30 => {},
-            0x31 => {},
-            0x32 => {},
-            0x33 => {},
-            0x34 => {},
-            0x35 => {},
-            0x36 => {},
-            0x37 => {},
-            0x38 => {},
-            0x39 => {},
-            0x3A => {},
-            0x3B => {},
-            0x3C => {},
-            0x3D => {},
-            0x3E => {},
-            0x3F => {},
+            0x30 => self.swap_r8("B"),
+            0x31 => self.swap_r8("C"),
+            0x32 => self.swap_r8("D"),
+            0x33 => self.swap_r8("E"),
+            0x34 => self.swap_r8("H"),
+            0x35 => self.swap_r8("L"),
+            0x36 => self.swap_hl(),
+            0x37 => self.swap_r8("A"),
+            0x38 => self.srl_r8("B"),
+            0x39 => self.srl_r8("C"),
+            0x3A => self.srl_r8("D"),
+            0x3B => self.srl_r8("E"),
+            0x3C => self.srl_r8("H"),
+            0x3D => self.srl_r8("L"),
+            0x3E => self.srl_hl(),
+            0x3F => self.srl_r8("A"),
+   
+            0x40 => self.bit_u3_r8(0, "B"),
+            0x41 => self.bit_u3_r8(0, "C"),
+            0x42 => self.bit_u3_r8(0, "D"),
+            0x43 => self.bit_u3_r8(0, "E"),
+            0x44 => self.bit_u3_r8(0, "H"),
+            0x45 => self.bit_u3_r8(0, "L"),
+            0x46 => self.bit_u3_hl(0),
+            0x47 => self.bit_u3_r8(0, "A"),
+            0x48 => self.bit_u3_r8(1, "B"),
+            0x49 => self.bit_u3_r8(1, "C"),
+            0x4A => self.bit_u3_r8(1, "D"),
+            0x4B => self.bit_u3_r8(1, "E"),
+            0x4C => self.bit_u3_r8(1, "H"),
+            0x4D => self.bit_u3_r8(1, "L"),
+            0x4E => self.bit_u3_hl(1),
+            0x4F => self.bit_u3_r8(1, "A"),
 
-            0x40 => {},
-            0x41 => {},
-            0x42 => {},
-            0x43 => {},
-            0x44 => {},
-            0x45 => {},
-            0x46 => {},
-            0x47 => {},
-            0x48 => {},
-            0x49 => {},
-            0x4A => {},
-            0x4B => {},
-            0x4C => {},
-            0x4D => {},
-            0x4E => {},
-            0x4F => {},
+            0x50 => self.bit_u3_r8(2, "B"),
+            0x51 => self.bit_u3_r8(2, "C"),
+            0x52 => self.bit_u3_r8(2, "D"),
+            0x53 => self.bit_u3_r8(2, "E"),
+            0x54 => self.bit_u3_r8(2, "H"),
+            0x55 => self.bit_u3_r8(2, "L"),
+            0x56 => self.bit_u3_hl(2),
+            0x57 => self.bit_u3_r8(2, "A"),
+            0x58 => self.bit_u3_r8(3, "B"),
+            0x59 => self.bit_u3_r8(3, "C"),
+            0x5A => self.bit_u3_r8(3, "D"),
+            0x5B => self.bit_u3_r8(3, "E"),
+            0x5C => self.bit_u3_r8(3, "H"),
+            0x5D => self.bit_u3_r8(3, "L"),
+            0x5E => self.bit_u3_hl(3),
+            0x5F => self.bit_u3_r8(3, "A"),
 
-            0x50 => {},
-            0x51 => {},
-            0x52 => {},
-            0x53 => {},
-            0x54 => {},
-            0x55 => {},
-            0x56 => {},
-            0x57 => {},
-            0x58 => {},
-            0x59 => {},
-            0x5A => {},
-            0x5B => {},
-            0x5C => {},
-            0x5D => {},
-            0x5E => {},
-            0x5F => {},
+            0x60 => self.bit_u3_r8(4, "B"),
+            0x61 => self.bit_u3_r8(4, "C"),
+            0x62 => self.bit_u3_r8(4, "D"),
+            0x63 => self.bit_u3_r8(4, "E"),
+            0x64 => self.bit_u3_r8(4, "H"),
+            0x65 => self.bit_u3_r8(4, "L"),
+            0x66 => self.bit_u3_hl(4),
+            0x67 => self.bit_u3_r8(4, "A"),
+            0x68 => self.bit_u3_r8(5, "B"),
+            0x69 => self.bit_u3_r8(5, "C"),
+            0x6A => self.bit_u3_r8(5, "D"),
+            0x6B => self.bit_u3_r8(5, "E"),
+            0x6C => self.bit_u3_r8(5, "H"),
+            0x6D => self.bit_u3_r8(5, "L"),
+            0x6E => self.bit_u3_hl(5),
+            0x6F => self.bit_u3_r8(5, "A"),
 
-            0x60 => {},
-            0x61 => {},
-            0x62 => {},
-            0x63 => {},
-            0x64 => {},
-            0x65 => {},
-            0x66 => {},
-            0x67 => {},
-            0x68 => {},
-            0x69 => {},
-            0x6A => {},
-            0x6B => {},
-            0x6C => {},
-            0x6D => {},
-            0x6E => {},
-            0x6F => {},
-
-            0x70 => {},
-            0x71 => {},
-            0x72 => {},
-            0x73 => {},
-            0x74 => {},
-            0x75 => {},
-            0x76 => {},
-            0x77 => {},
-            0x78 => {},
-            0x79 => {},
-            0x7A => {},
-            0x7B => {},
-            0x7C => {},
-            0x7D => {},
-            0x7E => {},
-            0x7F => {},
-
-            0x80 => {},
-            0x81 => {},
-            0x82 => {},
-            0x83 => {},
-            0x84 => {},
-            0x85 => {},
-            0x86 => {},
-            0x87 => {},
-            0x88 => {},
-            0x89 => {},
-            0x8A => {},
-            0x8B => {},
-            0x8C => {},
-            0x8D => {},
-            0x8E => {},
-            0x8F => {},
-
-            0x90 => {},
-            0x91 => {},
-            0x92 => {},
-            0x93 => {},
-            0x94 => {},
-            0x95 => {},
-            0x96 => {},
-            0x97 => {},
-            0x98 => {},
-            0x99 => {},
-            0x9A => {},
-            0x9B => {},
-            0x9C => {},
-            0x9D => {},
-            0x9E => {},
-            0x9F => {},
-
-            0xA0 => {},
-            0xA1 => {},
-            0xA2 => {},
-            0xA3 => {},
-            0xA4 => {},
-            0xA5 => {},
-            0xA6 => {},
-            0xA7 => {},
-            0xA8 => {},
-            0xA9 => {},
-            0xAA => {},
-            0xAB => {},
-            0xAC => {},
-            0xAD => {},
-            0xAE => {},
-            0xAF => {},
+            0x70 => self.bit_u3_r8(6, "B"),
+            0x71 => self.bit_u3_r8(6, "C"),
+            0x72 => self.bit_u3_r8(6, "D"),
+            0x73 => self.bit_u3_r8(6, "E"),
+            0x74 => self.bit_u3_r8(6, "H"),
+            0x75 => self.bit_u3_r8(6, "L"),
+            0x76 => self.bit_u3_hl(6),
+            0x77 => self.bit_u3_r8(6, "A"),
+            0x78 => self.bit_u3_r8(7, "B"),
+            0x79 => self.bit_u3_r8(7, "C"),
+            0x7A => self.bit_u3_r8(7, "D"),
+            0x7B => self.bit_u3_r8(7, "E"),
+            0x7C => self.bit_u3_r8(7, "H"),
+            0x7D => self.bit_u3_r8(7, "L"),
+            0x7E => self.bit_u3_hl(7),
+            0x7F => self.bit_u3_r8(7, "A"),
             
-            0xB0 => {},
-            0xB1 => {},
-            0xB2 => {},
-            0xB3 => {},
-            0xB4 => {},
-            0xB5 => {},
-            0xB6 => {},
-            0xB7 => {},
-            0xB8 => {},
-            0xB9 => {},
-            0xBA => {},
-            0xBB => {},
-            0xBC => {},
-            0xBD => {},
-            0xBE => {},
-            0xBF => {},
+            0x80 => self.res_u3_r8(0, "B"),
+            0x81 => self.res_u3_r8(0, "C"),
+            0x82 => self.res_u3_r8(0, "D"),
+            0x83 => self.res_u3_r8(0, "E"),
+            0x84 => self.res_u3_r8(0, "H"),
+            0x85 => self.res_u3_r8(0, "L"),
+            0x86 => self.res_u3_hl(0),
+            0x87 => self.res_u3_r8(0, "A"),
+            0x88 => self.res_u3_r8(1, "B"),
+            0x89 => self.res_u3_r8(1, "C"),
+            0x8A => self.res_u3_r8(1, "D"),
+            0x8B => self.res_u3_r8(1, "E"),
+            0x8C => self.res_u3_r8(1, "H"),
+            0x8D => self.res_u3_r8(1, "L"),
+            0x8E => self.res_u3_hl(1),
+            0x8F => self.res_u3_r8(1, "A"),
 
-            0xC0 => {},
-            0xC1 => {},
-            0xC2 => {},
-            0xC3 => {},
-            0xC4 => {},
-            0xC5 => {},
-            0xC6 => {},
-            0xC7 => {},
-            0xC8 => {},
-            0xC9 => {},
-            0xCA => {},
-            0xCB => {},
-            0xCC => {},
-            0xCD => {},
-            0xCE => {},
-            0xCF => {},
-
-            0xD0 => {},
-            0xD1 => {},
-            0xD2 => {},
-            0xD3 => {},
-            0xD4 => {},
-            0xD5 => {},
-            0xD6 => {},
-            0xD7 => {},
-            0xD8 => {},
-            0xD9 => {},
-            0xDA => {},
-            0xDB => {},
-            0xDC => {},
-            0xDD => {},
-            0xDE => {},
-            0xDF => {},
-
-            0xE0 => {},
-            0xE1 => {},
-            0xE2 => {},
-            0xE3 => {},
-            0xE4 => {},
-            0xE5 => {},
-            0xE6 => {},
-            0xE7 => {},
-            0xE8 => {},
-            0xE9 => {},
-            0xEA => {},
-            0xEB => {},
-            0xEC => {},
-            0xED => {},
-            0xEE => {},
-            0xEF => {},
+            0x90 => self.res_u3_r8(2, "B"),
+            0x91 => self.res_u3_r8(2, "C"),
+            0x92 => self.res_u3_r8(2, "D"),
+            0x93 => self.res_u3_r8(2, "E"),
+            0x94 => self.res_u3_r8(2, "H"),
+            0x95 => self.res_u3_r8(2, "L"),
+            0x96 => self.res_u3_hl(2),
+            0x97 => self.res_u3_r8(2, "A"),
+            0x98 => self.res_u3_r8(3, "B"),
+            0x99 => self.res_u3_r8(3, "C"),
+            0x9A => self.res_u3_r8(3, "D"),
+            0x9B => self.res_u3_r8(3, "E"),
+            0x9C => self.res_u3_r8(3, "H"),
+            0x9D => self.res_u3_r8(3, "L"),
+            0x9E => self.res_u3_hl(3),
+            0x9F => self.res_u3_r8(3, "A"),
+                    
+            0xA0 => self.res_u3_r8(4, "B"),
+            0xA1 => self.res_u3_r8(4, "C"),
+            0xA2 => self.res_u3_r8(4, "D"),
+            0xA3 => self.res_u3_r8(4, "E"),
+            0xA4 => self.res_u3_r8(4, "H"),
+            0xA5 => self.res_u3_r8(4, "L"),
+            0xA6 => self.res_u3_hl(4),
+            0xA7 => self.res_u3_r8(4, "A"),
+            0xA8 => self.res_u3_r8(5, "B"),
+            0xA9 => self.res_u3_r8(5, "C"),
+            0xAA => self.res_u3_r8(5, "D"),
+            0xAB => self.res_u3_r8(5, "E"),
+            0xAC => self.res_u3_r8(5, "H"),
+            0xAD => self.res_u3_r8(5, "L"),
+            0xAE => self.res_u3_hl(5),
+            0xAF => self.res_u3_r8(5, "A"),
             
-            0xF0 => {},
-            0xF1 => {},
-            0xF2 => {},
-            0xF3 => {},
-            0xF4 => {},
-            0xF5 => {},
-            0xF6 => {},
-            0xF7 => {},
-            0xF8 => {},
-            0xF9 => {},
-            0xFA => {},
-            0xFB => {},
-            0xFC => {},
-            0xFD => {},
-            0xFE => {},
-            0xFF => {},
+            0xB0 => self.res_u3_r8(6, "B"),
+            0xB1 => self.res_u3_r8(6, "C"),
+            0xB2 => self.res_u3_r8(6, "D"),
+            0xB3 => self.res_u3_r8(6, "E"),
+            0xB4 => self.res_u3_r8(6, "H"),
+            0xB5 => self.res_u3_r8(6, "L"),
+            0xB6 => self.res_u3_hl(6),
+            0xB7 => self.res_u3_r8(6, "A"),
+            0xB8 => self.res_u3_r8(7, "B"),
+            0xB9 => self.res_u3_r8(7, "C"),
+            0xBA => self.res_u3_r8(7, "D"),
+            0xBB => self.res_u3_r8(7, "E"),
+            0xBC => self.res_u3_r8(7, "H"),
+            0xBD => self.res_u3_r8(7, "L"),
+            0xBE => self.res_u3_hl(7),
+            0xBF => self.res_u3_r8(7, "A"),
+
+            0xC0 => self.set_u3_r8(0, "B"),
+            0xC1 => self.set_u3_r8(0, "C"),
+            0xC2 => self.set_u3_r8(0, "D"),
+            0xC3 => self.set_u3_r8(0, "E"),
+            0xC4 => self.set_u3_r8(0, "H"),
+            0xC5 => self.set_u3_r8(0, "L"),
+            0xC6 => self.set_u3_hl(0),
+            0xC7 => self.set_u3_r8(0, "A"),
+            0xC8 => self.set_u3_r8(1, "B"),
+            0xC9 => self.set_u3_r8(1, "C"),
+            0xCA => self.set_u3_r8(1, "D"),
+            0xCB => self.set_u3_r8(1, "E"),
+            0xCC => self.set_u3_r8(1, "H"),
+            0xCD => self.set_u3_r8(1, "L"),
+            0xCE => self.set_u3_hl(1),
+            0xCF => self.set_u3_r8(1, "A"),
+            
+            0xD0 => self.set_u3_r8(2, "B"),
+            0xD1 => self.set_u3_r8(2, "C"),
+            0xD2 => self.set_u3_r8(2, "D"),
+            0xD3 => self.set_u3_r8(2, "E"),
+            0xD4 => self.set_u3_r8(2, "H"),
+            0xD5 => self.set_u3_r8(2, "L"),
+            0xD6 => self.set_u3_hl(2),
+            0xD7 => self.set_u3_r8(2, "A"),
+            0xD8 => self.set_u3_r8(3, "B"),
+            0xD9 => self.set_u3_r8(3, "C"),
+            0xDA => self.set_u3_r8(3, "D"),
+            0xDB => self.set_u3_r8(3, "E"),
+            0xDC => self.set_u3_r8(3, "H"),
+            0xDD => self.set_u3_r8(3, "L"),
+            0xDE => self.set_u3_hl(3),
+            0xDF => self.set_u3_r8(3, "A"),
+
+            0xE0 => self.set_u3_r8(4, "B"),
+            0xE1 => self.set_u3_r8(4, "C"),
+            0xE2 => self.set_u3_r8(4, "D"),
+            0xE3 => self.set_u3_r8(4, "E"),
+            0xE4 => self.set_u3_r8(4, "H"),
+            0xE5 => self.set_u3_r8(4, "L"),
+            0xE6 => self.set_u3_hl(4),
+            0xE7 => self.set_u3_r8(4, "A"),
+            0xE8 => self.set_u3_r8(5, "B"),
+            0xE9 => self.set_u3_r8(5, "C"),
+            0xEA => self.set_u3_r8(5, "D"),
+            0xEB => self.set_u3_r8(5, "E"),
+            0xEC => self.set_u3_r8(5, "H"),
+            0xED => self.set_u3_r8(5, "L"),
+            0xEE => self.set_u3_hl(5),
+            0xEF => self.set_u3_r8(5, "A"),
+            
+            0xF0 => self.set_u3_r8(6, "B"),
+            0xF1 => self.set_u3_r8(6, "C"),
+            0xF2 => self.set_u3_r8(6, "D"),
+            0xF3 => self.set_u3_r8(6, "E"),
+            0xF4 => self.set_u3_r8(6, "H"),
+            0xF5 => self.set_u3_r8(6, "L"),
+            0xF6 => self.set_u3_hl(6),
+            0xF7 => self.set_u3_r8(6, "A"),
+            0xF8 => self.set_u3_r8(7, "B"),
+            0xF9 => self.set_u3_r8(7, "C"),
+            0xFA => self.set_u3_r8(7, "D"),
+            0xFB => self.set_u3_r8(7, "E"),
+            0xFC => self.set_u3_r8(7, "H"),
+            0xFD => self.set_u3_r8(7, "L"),
+            0xFE => self.set_u3_hl(7),
+            0xFF => self.set_u3_r8(7, "A"),
         }
 
+        // incrementing PC and returning M-cycles handled here for all 0xCB opcodes
         self.inc_PC(2);
         if (opcode & 0xF)!= 0x6 && (opcode & 0xF) != 0xE { 2 }
         else { 
             if let 0x4..=0x7 = (opcode & 0xF0) >> 4 { 3 }
             else { 4 }
         }
+    }
+
+    fn set_u3_r8(&mut self, u3: u8, r8_name: &str) {
+        let r8 = self.r8(r8_name);
+        self.set_r8(r8_name, r8 | (1 << u3));
+    }
+
+    fn set_u3_hl(&mut self, u3: u8) {
+        let hl = self.get_memory(self.HL());
+        self.set_memory(self.HL(), hl | (1 << u3));
+    }
+
+    fn res_u3_r8(&mut self, u3: u8, r8_name: &str) {
+        let r8 = self.r8(r8_name);
+        self.set_r8(r8_name, r8 & !(1 << u3));
+    }
+
+    fn res_u3_hl(&mut self, u3: u8) {
+        let hl = self.get_memory(self.HL());
+        self.set_memory(self.HL(), hl & !(1 << u3));
+    }
+
+    fn bit_u3_r8(&mut self, u3: u8, r8_name: &str) {
+        let r8 = self.r8(r8_name);
+        self.set_all_flags(r8 & (1 << u3) == 0, false, true, self.cflag());
+    }
+
+    fn bit_u3_hl(&mut self, u3: u8) {
+        let hl = self.get_memory(self.HL());
+        self.set_all_flags(hl & (1 << u3) == 0, false, true, self.cflag());
+    }
+
+    fn swap_r8(&mut self, r8_name: &str) {
+        let res = self.swap_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn swap_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.swap_and_set_flags(hl);
+        self.set_memory(self.HL(), res);
+    }
+
+    fn swap_and_set_flags(&mut self, val: u8) -> u8 {
+        let lo = val & 0x0F;
+        let res = (lo << 4) | (val >> 4);
+        self.set_all_flags(res == 0, false, false, false);
+        res
+    }
+
+    fn sla_r8(&mut self, r8_name: &str) {
+        let res = self.sla_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn sla_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.sla_and_set_flags(hl);
+        self.set_memory(self.HL(), res);
+    }
+    
+    fn sla_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x80 == 0x80;
+        let res = val << 1;
+        self.set_all_flags(res == 0, false, false, c);
+        res
+    }
+
+    fn sra_r8(&mut self, r8_name: &str) {
+        let res = self.sra_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn sra_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.sra_and_set_flags(hl);
+        self.set_memory(self.HL(), res);
+    }
+
+    fn sra_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x01 == 0x01;
+        let res = (val & 0x80) | val >> 1;
+        self.set_all_flags(res == 0, false, false, c);
+        res
+    }
+
+    fn srl_r8(&mut self, r8_name: &str) {
+        let res = self.srl_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn srl_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.srl_and_set_flags(hl);
+        self.set_memory(self.HL(), res);
+    }
+
+    fn srl_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x01 == 0x01;
+        let res = val >> 1;
+        self.set_all_flags(res == 0, false, false, c);
+        res
+    }
+
+    fn rlc_r8(&mut self, r8_name: &str) {
+        let res = self.rlc_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn rlc_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.rlc_and_set_flags(hl);
+        self.set_memory(self.HL(), res)
+    }
+
+    fn rlc_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x80 == 0x80;
+        let res = (val << 1) | if c { 1 } else { 0 }; 
+        self.set_all_flags(res == 0, false, false, c);
+        res
+    }
+
+    fn rl_r8(&mut self, r8_name: &str) {
+        let res = self.rl_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn rl_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.rl_and_set_flags(hl);
+        self.set_memory(self.HL(), res)
+    }
+
+    fn rl_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x80 == 0x80;
+        let res = (val << 1) | if self.cflag() { 1 } else { 0 }; 
+        self.set_all_flags(res == 0, false, false, c);
+        res
+    }
+
+    fn rrc_r8(&mut self, r8_name: &str) {
+        let res = self.rrc_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn rrc_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.rrc_and_set_flags(hl);
+        self.set_memory(self.HL(), res)
+    }
+
+    fn rrc_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x01 == 0x01;
+        let res = (val >> 1) | if c { 0x80 } else { 0 }; 
+        self.set_all_flags(res == 0, false, false, c);
+        res
+    }
+
+    fn rr_r8(&mut self, r8_name: &str) {
+        let res = self.rr_and_set_flags(self.r8(r8_name));
+        self.set_r8(r8_name, res);
+    }
+
+    fn rr_hl(&mut self) {
+        let hl = self.get_memory(self.HL());
+        let res = self.rr_and_set_flags(hl);
+        self.set_memory(self.HL(), res)
+    }
+
+    fn rr_and_set_flags(&mut self, val: u8) -> u8 {
+        let c = val & 0x01 == 0x01;
+        let res = (val >> 1) | if self.cflag() { 0x80 } else { 0 }; 
+        self.set_all_flags(res == 0, false, false, c);
+        res
     }
 
     fn n8(&self) -> u8 {
