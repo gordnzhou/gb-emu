@@ -14,7 +14,7 @@ impl Register {
     }
 
     pub fn bit(&self, k: usize) -> bool {
-        self.0 & (1 << k) == 1
+        self.0 & (1 << k) != 0
     }
 
     pub fn set(&mut self, val: usize) {

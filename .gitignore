@@ -2,3 +2,5 @@
 Cargo.lock
 /roms
 /.vscode
+/DS_Store
+/logs

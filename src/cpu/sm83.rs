@@ -2,9 +2,22 @@
 use std::fs::File;
 use std::io::{self, Read};
 
+use crate::mmu::MMU;
 use crate::register::Register;
 
-const MEMORY_SIZE: usize = 0xFFFF;
+
+use std::fs::OpenOptions;
+use std::io::prelude::*;
+
+// FOR TESTING
+fn log_to_file(message: &str) -> std::io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("logs/log.txt")?;
+    
+    writeln!(file, "{}", message)
+}
 
 pub struct SM83 {
     AF: Register,
@@ -13,20 +26,19 @@ pub struct SM83 {
     HL: Register,
     PC: Register,
     SP: Register,
-    memory: [u8; MEMORY_SIZE],
-
+    pub memory: MMU,
 }
 
 impl SM83 {
     pub fn new() -> Self {
         SM83 { 
-            AF: Register(0),
-            BC: Register(0),
-            DE: Register(0),
-            HL: Register(0),
-            PC: Register(0x100),
-            SP: Register(0),
-            memory: [0; MEMORY_SIZE],
+            AF: Register(0x01B0),
+            BC: Register(0x0013),
+            DE: Register(0x00D8),
+            HL: Register(0x014D),
+            PC: Register(0x0100),
+            SP: Register(0xFFFE),
+            memory: MMU::new(),
         }
     }
 
@@ -34,7 +46,7 @@ impl SM83 {
         match SM83::read_rom_from_file(rom_path) {
             Ok(rom_data) => {
                 for i in 0..rom_data.len() {
-                    self.memory[i] = rom_data[i];
+                    self.memory.write_byte(i, rom_data[i]);
                 }
 
                 println!("Sucessfully read ROM starting at memory address {:#06x}", 0);
@@ -62,12 +74,15 @@ impl SM83 {
     // write-only IME flag (handles interrupts)
     // returns the number of clock M-cycles
     pub fn fetch_execute(&mut self) -> u8 {
-        let opcode = self.memory[self.PC()];
-        self.inc_PC(1);
+        let opcode = self.memory.read_byte(self.PC());
 
-        println!("Executing opcode: {:#03x} with following bytes: {:#03x} {:#03x}\nPC={:#06x} SP={:#06x}\nA={:#04x}, F={:#04x}\nB={:#04x}, C={:#04x}\nD={:#04x}, E={:#04x}\nH={:#04x}, L={:#04x}\n\n", 
-            opcode, self.memory[self.PC()], self.memory[self.PC().wrapping_add(1)], self.PC().wrapping_sub(1), self.SP(), 
-            self.A(), self.AF() & 0xFF, self.B(), self.C(), self.D(), self.E(), self.H(), self.L());
+        // FOR TESTING
+        let log_message = format!("A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}", 
+            self.A(), self.AF.lo(), self.B(), self.C(), self.D(), self.E(), self.H(), self.L(),
+            self.SP(), self.PC(), opcode, self.memory.read_byte(self.PC() + 1), self.memory.read_byte(self.PC() + 2), self.memory.read_byte(self.PC() + 3));  
+        log_to_file(&log_message).unwrap();
+
+        self.inc_PC(1);
 
         // executes instruction and returns number of clock cycles
         match opcode {
@@ -346,6 +361,30 @@ impl SM83 {
         }
     }
 
+    // fn handle_interrupts(&mut self) {
+    //     if self.interrupts_enabled {
+    //         let if_reg = self.memory.read_byte(0xFF0F); // Interrupt Flags
+    //         let ie_reg = self.memory.read_byte(0xFFFF); // Interrupt Enable
+    
+    //         for i in 0..5 {
+    //             let mask = 1 << i;
+    //             if if_reg & mask != 0 && ie_reg & mask != 0 {
+    //                 self.interrupts_enabled = false;
+    //                 self.memory.write_byte(0xFF0F, if_reg & !mask); // Reset IF flag
+    //                 self.PC() = match i {
+    //                     0 => 0x40, // V-Blank
+    //                     1 => 0x48, // LCD STAT
+    //                     2 => 0x50, // Timer
+    //                     3 => 0x58, // Serial
+    //                     4 => 0x60, // Joypad
+    //                     _ => unreachable!(),
+    //                 };
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
+
     fn nop(&mut self) -> u8 {
         1
     }
@@ -377,8 +416,9 @@ impl SM83 {
     }
 
     fn reti(&mut self) -> u8 {
+        let res = self.pop_stack();
+        self.set_PC(res);
         // TODO
-        // set PC to bytes at [SP], [SP + 1]
         // set IME to true
         4
     }
@@ -418,8 +458,12 @@ impl SM83 {
     }
 
     fn jp_cc_n16(&mut self, cc : bool) -> u8 {
-        if cc { self.jp_n16(); 4 }
-        else { 3 }
+        let n16 = self.n16();
+
+        if cc { 
+            self.set_PC(n16);
+            4 
+        } else { 3 }
     }
 
     fn jp_hl(&mut self) -> u8 {
@@ -428,15 +472,22 @@ impl SM83 {
     }
 
     fn jr_e8(&mut self) -> u8 {
+        let e8 = self.e8() as i16;
         let mut pc = self.PC() as i16;
-        pc = pc.wrapping_add(self.e8() as i16);
-        self.set_PC(pc as usize);
+        pc = pc.wrapping_add(e8);
+        self.set_PC((pc as u16) as usize);
         3
     }
 
     fn jr_cc_e8(&mut self, cc: bool) -> u8 {
-        if cc { self.jr_e8(); 3 }
-        else { 2 }
+        let e8 = self.e8() as i16;
+        let mut pc = self.PC() as i16;
+
+        if cc {
+            pc = pc.wrapping_add(e8);
+            self.set_PC((pc as u16) as usize);
+            3
+        } else { 2 }
     }
 
     fn rst(&mut self, vec: usize) -> u8 {
@@ -453,8 +504,13 @@ impl SM83 {
     }
 
     fn call_cc_n16(&mut self, cc: bool) -> u8 {
-        if cc { self.call_n16(); 6 }
-        else { 3 }
+        let n16 = self.n16();
+
+        if cc {
+            self.push_stack(self.PC());
+            self.set_PC(n16);
+            6
+        } else { 3 }
     }
 
     fn ret(&mut self) -> u8 {
@@ -464,13 +520,16 @@ impl SM83 {
     }
 
     fn ret_cc(&mut self, cc: bool) -> u8 {
-        if cc { self.ret(); 5 }
-        else { 2 }
+        if cc { 
+            let res = self.pop_stack();
+            self.set_PC(res); 
+            5 
+        } else { 2 }
     }
 
     fn pop_af(&mut self) -> u8 {
         let res = self.pop_stack();
-        self.AF.set(res);
+        self.set_AF(res);
         3
     }
 
@@ -493,24 +552,22 @@ impl SM83 {
 
     fn pop_stack(&mut self) -> usize {
         let sp = self.SP();
-        let lo = self.read_memory(sp);
-        let hi = self.read_memory(sp.wrapping_add(1));
+        let res = self.memory.read_word(sp);
         self.set_SP(sp.wrapping_add(2));
-        ((hi as usize) << 8) + lo as usize
+        res as usize
     }
 
     fn push_stack(&mut self, val16: usize) {
         let hi = ((val16 & 0xFF00) >> 8) as u8;
         let lo = val16 as u8;
         let sp = self.SP();
-
-        self.write_memory(sp.wrapping_sub(1), hi);
-        self.write_memory(sp.wrapping_add(2), lo);
+        self.memory.write_byte(sp.wrapping_sub(1), hi);
+        self.memory.write_byte(sp.wrapping_sub(2), lo);
         self.set_SP(sp.wrapping_sub(2));
     }
 
-    fn ld_r8_r8(&mut self, r8l_name: &str, r8r_name: &str) -> u8{
-        self.set_r8(r8l_name, self.r8(r8r_name));
+    fn ld_r8_r8(&mut self, r8_name: &str, r8r_name: &str) -> u8{
+        self.set_r8(r8_name, self.r8(r8r_name));
         1
     }
 
@@ -528,69 +585,69 @@ impl SM83 {
 
     fn ld_hl_n8(&mut self) -> u8{
         let n8 = self.n8();
-        self.write_memory(self.HL(), n8);
+        self.memory.write_byte(self.HL(), n8);
         3
     }
 
     fn ld_hl_r8(&mut self, r8_name: &str) -> u8{
-        self.write_memory(self.HL(), self.r8(r8_name));
+        self.memory.write_byte(self.HL(), self.r8(r8_name));
         2
     }
 
     fn ld_r8_hl(&mut self, r8_name: &str) -> u8 {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         self.set_r8(r8_name, hl);
         2
     }
 
     fn ld_r16_a(&mut self, r16_name: &str) -> u8 {
-        self.write_memory(self.r16(r16_name), self.A());
+        self.memory.write_byte(self.r16(r16_name), self.A());
         2
     }
 
     fn ld_a_r16(&mut self, r16_name: &str) -> u8 {
-        let r16 = self.read_memory(self.r16(r16_name));
+        let r16 = self.memory.read_byte(self.r16(r16_name));
         self.set_A(r16);
         2
     }
 
     fn ld_n16_a(&mut self) -> u8 {
         let n16 = self.n16();
-        self.write_memory(n16, self.A());
+        self.memory.write_byte(n16, self.A());
         4
     }
 
     fn ld_a_n16(&mut self) -> u8 {
         let n16 = self.n16();
-        let n16 = self.read_memory(n16);
+        let n16 = self.memory.read_byte(n16);
         self.set_A(n16);
         4
     }
 
     fn ld_hli_a(&mut self) -> u8 {
         let hl = self.HL();
-        self.write_memory(hl, self.A());
+        self.memory.write_byte(hl, self.A());
         self.set_HL(hl.wrapping_add(1));
         2
     }
 
     fn ld_hld_a(&mut self) -> u8 {
         let hl = self.HL();
-        self.write_memory(hl, self.A());
+        self.memory.write_byte(hl, self.A());
         self.set_HL(hl.wrapping_sub(1));
         2
     }
 
     fn ld_a_hli(&mut self) -> u8 {
         let hl = self.HL();
-        self.set_A(self.read_memory(hl));
+        self.set_A(self.memory.read_byte(hl));
         self.set_HL(hl.wrapping_add(1));
         2
     }
 
     fn ld_a_hld(&mut self) -> u8 {
         let hl = self.HL();
-        self.set_A(self.read_memory(hl));
+        self.set_A(self.memory.read_byte(hl));
         self.set_HL(hl.wrapping_sub(1));
         2
     }
@@ -598,8 +655,7 @@ impl SM83 {
     fn ld_n16_sp(&mut self) -> u8 {
         let n16 = self.n16();
         let sp = self.SP();
-        self.write_memory(n16, sp as u8);
-        self.write_memory(n16.wrapping_add(1), (sp >> 8) as u8);
+        self.memory.write_word(n16, sp as u16);
         5
     }
 
@@ -616,25 +672,25 @@ impl SM83 {
 
     fn ldh_n16_a(&mut self) -> u8 {
         let n16 = 0xFF00 | (self.n8() as usize);
-        self.write_memory(n16, self.A());
+        self.memory.write_byte(n16, self.A());
         3
     }
 
     fn ldh_a_n16(&mut self) -> u8 {
         let n16 = 0xFF00 | (self.n8() as usize);
-        self.set_A(self.read_memory(n16));
+        self.set_A(self.memory.read_byte(n16));
         3
     }
 
     fn ldh_c_a(&mut self) -> u8 {
         let c = 0xFF00 | self.C() as usize;
-        self.write_memory(c, self.A());
+        self.memory.write_byte(c, self.A());
         2
     }
 
     fn ldh_a_c(&mut self) -> u8 {
         let c = 0xFF00 | self.C() as usize;
-        self.set_A(self.read_memory(c));
+        self.set_A(self.memory.read_byte(c));
         2
     }
 
@@ -683,16 +739,16 @@ impl SM83 {
     }
 
     fn dec_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.r16("HL"));
+        let hl = self.memory.read_byte(self.HL());
         let res = hl.wrapping_sub(1);
         self.set_all_flags(res == 0, true, hl & 0xf == 0, self.cflag());
-        self.write_memory(self.r16("HL"), res);
+        self.memory.write_byte(self.HL(), res);
         3
     }
 
     fn dec_r16(&mut self, r16_name: &str) -> u8 {
-        let r16 = self.r16(r16_name);
-        self.set_r16(r16_name, r16.wrapping_add(1));
+        let r16 = self.r16(r16_name) as u16;
+        self.set_r16(r16_name, r16.wrapping_sub(1) as usize);
         2
     }
 
@@ -705,16 +761,16 @@ impl SM83 {
     }
 
     fn inc_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.r16("HL"));
+        let hl = self.memory.read_byte(self.HL());
         let res = hl.wrapping_add(1);
         self.set_all_flags(res == 0, false, hl & 0xf == 0xf, self.cflag());
-        self.write_memory(self.r16("HL"), res);
+        self.memory.write_byte(self.HL(), res);
         3
     }
 
     fn inc_r16(&mut self, r16_name: &str) -> u8 {
-        let r16 = self.r16(r16_name);
-        self.set_r16(r16_name, r16.wrapping_add(1));
+        let r16 = self.r16(r16_name) as u16;
+        self.set_r16(r16_name, r16.wrapping_add(1) as usize);
         2
     }
 
@@ -726,7 +782,7 @@ impl SM83 {
     }
 
     fn xor_a_hl(&mut self) -> u8 {
-        let res = self.A() ^ self.read_memory(self.HL());
+        let res = self.A() ^ self.memory.read_byte(self.HL());
         self.set_A(res);
         self.set_all_flags(res == 0, false, false, false);
         2
@@ -747,7 +803,7 @@ impl SM83 {
     }
 
     fn or_a_hl(&mut self) -> u8 {
-        let res = self.A() | self.read_memory(self.HL());
+        let res = self.A() | self.memory.read_byte(self.HL());
         self.set_A(res);
         self.set_all_flags(res == 0, false, false, false);
         2
@@ -768,7 +824,7 @@ impl SM83 {
     }
 
     fn and_a_hl(&mut self) -> u8 {
-        let res = self.A() & self.read_memory(self.HL());
+        let res = self.A() & self.memory.read_byte(self.HL());
         self.set_A(res);
         self.set_all_flags(res == 0, false, true, false);
         2
@@ -789,7 +845,7 @@ impl SM83 {
     }
 
     fn sbc_a_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.HL()) as u32;
+        let hl = self.memory.read_byte(self.HL()) as u32;
         let res = self.sub_and_set_flags(self.A() as u32, hl, true);
         self.set_A(res);
         2
@@ -810,7 +866,7 @@ impl SM83 {
     }
 
     fn sub_a_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.HL()) as u32;
+        let hl = self.memory.read_byte(self.HL()) as u32;
         let res = self.sub_and_set_flags(self.A() as u32, hl, false);
         self.set_A(res);
         2
@@ -830,7 +886,7 @@ impl SM83 {
     }
 
     fn cp_a_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.HL()) as u32;
+        let hl = self.memory.read_byte(self.HL()) as u32;
         self.sub_and_set_flags(self.A() as u32, hl, false);
         2
     }
@@ -849,7 +905,7 @@ impl SM83 {
     }
 
     fn add_a_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.HL()) as u32;
+        let hl = self.memory.read_byte(self.HL()) as u32;
         let res = self.add_and_set_flags(self.A() as u32, hl, false);
         self.set_A(res);
         2
@@ -864,8 +920,7 @@ impl SM83 {
 
     fn add_hl_r16(&mut self, r16: usize) -> u8 {
         let r16 = r16 as u32;
-        let hl = self.read_memory(self.HL()) as u32;
-        let res = self.add16_and_set_flags(hl, r16);
+        let res = self.add16_and_set_flags(self.HL() as u32, r16);
         self.set_HL(res);
         2
     }
@@ -882,7 +937,7 @@ impl SM83 {
         let e8 = self.e8() as i32;
         let res = sp.wrapping_add(e8);
         self.set_all_flags(false, false, (sp ^ e8 ^ res) & 0x10 != 0, (sp ^ e8 ^ res) & 0x100 != 0);
-        res as usize
+        (res as u16) as usize
     }
 
     fn adc_a_r8(&mut self, r8: u8) -> u8 {
@@ -893,7 +948,7 @@ impl SM83 {
     }
 
     fn adc_a_hl(&mut self) -> u8 {
-        let hl = self.read_memory(self.HL()) as u32;
+        let hl = self.memory.read_byte(self.HL()) as u32;
         let res = self.add_and_set_flags(self.A() as u32, hl, true);
         self.set_A(res);
         2
@@ -908,27 +963,26 @@ impl SM83 {
 
     fn add16_and_set_flags(&mut self, a: u32, b: u32) -> usize {
         let r: u32 = a.wrapping_add(b);
-        self.set_all_flags(self.zflag(), ((a & 0xFFF) + (b & 0xFFF)) & 0x1000 > 0, false, r > 0xFFFF);
+        self.set_all_flags(self.zflag(), false, (a ^ b ^ r) & 0x1000 != 0, r & 0x10000 != 0);
         r as usize
     }
 
     fn sub_and_set_flags(&mut self, a: u32, b: u32, withCarry: bool) -> u8 {
         let carry: u32 = if withCarry { self.cflag() as u32 } else { 0 };
         let r: u32 = a.wrapping_sub(b).wrapping_sub(carry);
-        self.set_all_flags(r == 0, true, ((a & 0xf) - (b & 0xf) - (carry & 0xf)) & 0x10 > 0, (b + carry) > a);
+        self.set_all_flags(r as u8 == 0, true, (a ^ b ^ r) & 0x10 != 0, r & 0x100 != 0);
         r as u8
     }
 
     fn add_and_set_flags(&mut self, a: u32, b: u32, withCarry: bool) -> u8 {
         let carry: u32 = if withCarry { self.cflag() as u32 } else { 0 };
-        let r: u32 = a.wrapping_add(b).wrapping_add(carry);
-        self.set_all_flags(r == 0, false, ((a & 0xF) + (b & 0xF) + (carry & 0xF)) & 0x10 > 0, r > 0xFF);
+        let r = a.wrapping_add(b).wrapping_add(carry);
+        self.set_all_flags(r as u8 == 0, false, (a ^ b ^ r) & 0x10 != 0, r & 0x100 != 0);
         r as u8
     }
 
     fn cb_execute(&mut self, ) -> u8 {
-        let opcode = self.memory[self.PC()];
-        println!("executing 0xCB opcode: {:#04x}", opcode);
+        let opcode = self.memory.read_byte(self.PC());
         self.inc_PC(1);
 
         match opcode {
@@ -1219,8 +1273,8 @@ impl SM83 {
     }
 
     fn set_u3_hl(&mut self, u3: u8) {
-        let hl = self.read_memory(self.HL());
-        self.write_memory(self.HL(), hl | (1 << u3));
+        let hl = self.memory.read_byte(self.HL());
+        self.memory.write_byte(self.HL(), hl | (1 << u3));
     }
 
     fn res_u3_r8(&mut self, u3: u8, r8_name: &str) {
@@ -1229,8 +1283,8 @@ impl SM83 {
     }
 
     fn res_u3_hl(&mut self, u3: u8) {
-        let hl = self.read_memory(self.HL());
-        self.write_memory(self.HL(), hl & !(1 << u3));
+        let hl = self.memory.read_byte(self.HL());
+        self.memory.write_byte(self.HL(), hl & !(1 << u3));
     }
 
     fn bit_u3_r8(&mut self, u3: u8, r8_name: &str) {
@@ -1239,7 +1293,7 @@ impl SM83 {
     }
 
     fn bit_u3_hl(&mut self, u3: u8) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         self.set_all_flags(hl & (1 << u3) == 0, false, true, self.cflag());
     }
 
@@ -1249,9 +1303,9 @@ impl SM83 {
     }
 
     fn swap_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.swap_and_set_flags(hl);
-        self.write_memory(self.HL(), res);
+        self.memory.write_byte(self.HL(), res);
     }
 
     fn swap_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1267,9 +1321,9 @@ impl SM83 {
     }
 
     fn sla_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.sla_and_set_flags(hl);
-        self.write_memory(self.HL(), res);
+        self.memory.write_byte(self.HL(), res);
     }
     
     fn sla_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1285,9 +1339,9 @@ impl SM83 {
     }
 
     fn sra_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.sra_and_set_flags(hl);
-        self.write_memory(self.HL(), res);
+        self.memory.write_byte(self.HL(), res);
     }
 
     fn sra_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1303,9 +1357,9 @@ impl SM83 {
     }
 
     fn srl_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.srl_and_set_flags(hl);
-        self.write_memory(self.HL(), res);
+        self.memory.write_byte(self.HL(), res);
     }
 
     fn srl_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1321,9 +1375,9 @@ impl SM83 {
     }
 
     fn rlc_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.rlc_and_set_flags(hl);
-        self.write_memory(self.HL(), res)
+        self.memory.write_byte(self.HL(), res)
     }
 
     fn rlc_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1339,9 +1393,9 @@ impl SM83 {
     }
 
     fn rl_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.rl_and_set_flags(hl);
-        self.write_memory(self.HL(), res)
+        self.memory.write_byte(self.HL(), res)
     }
 
     fn rl_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1357,9 +1411,9 @@ impl SM83 {
     }
 
     fn rrc_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.rrc_and_set_flags(hl);
-        self.write_memory(self.HL(), res)
+        self.memory.write_byte(self.HL(), res)
     }
 
     fn rrc_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1375,9 +1429,9 @@ impl SM83 {
     }
 
     fn rr_hl(&mut self) {
-        let hl = self.read_memory(self.HL());
+        let hl = self.memory.read_byte(self.HL());
         let res = self.rr_and_set_flags(hl);
-        self.write_memory(self.HL(), res)
+        self.memory.write_byte(self.HL(), res)
     }
 
     fn rr_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1398,19 +1452,9 @@ impl SM83 {
     }
 
     fn n8(&mut self) -> u8 {
-        let res = self.read_memory(self.PC());
+        let res = self.memory.read_byte(self.PC());
         self.inc_PC(1);
         res
-    }
-
-    fn read_memory(&self, address: usize) -> u8 {
-        println!("reading memory at address: {:#06x}", address);
-        self.memory[address]
-    }
-
-    fn write_memory(&mut self, address: usize, byte: u8) {
-        println!("writing memory at address: {:#06x} with byte: {:#04x}", address, byte);
-        self.memory[address] = byte;
     }
 
     fn set_all_flags(&mut self, z: bool, n: bool, h: bool, c: bool) {
@@ -1429,6 +1473,7 @@ impl SM83 {
     fn r8(&self, name: &str) -> u8 {
         match name {
             "A" => { self.AF.hi() },
+            "F" => { self.AF.lo() },
             "B" => { self.BC.hi() },
             "C" => { self.BC.lo() },
             "D" => { self.DE.hi() },
@@ -1454,6 +1499,7 @@ impl SM83 {
 
     fn r16(&self, name: &str) -> usize {
         match name {
+            "BC" => { self.BC.full() },
             "DE" => { self.DE.full() },
             "HL" => { self.HL.full() },
             "PC" => { self.PC.full() },
@@ -1464,6 +1510,7 @@ impl SM83 {
 
     fn set_r16(&mut self, name: &str, val: usize) {
         match name {
+            "BC" => { self.BC.set(val) },
             "DE" => { self.DE.set(val) },
             "HL" => { self.HL.set(val) },
             "PC" => { self.PC.set(val) },
@@ -1488,12 +1535,12 @@ impl SM83 {
     fn PC(&self) -> usize { self.PC.full() }
     fn SP(&self) -> usize { self.SP.full() }
 
-    fn cflag(&self) -> bool { self.AF.bit(4) }
-    fn hflag(&self) -> bool { self.AF.bit(5) }
-    fn nflag(&self) -> bool { self.AF.bit(6) }
-    fn zflag(&self) -> bool { self.AF.bit(7) }
-
     fn set_A(&mut self, val: u8) { self.AF.set_hi(val); }
+
+    fn set_AF(&mut self, val: usize) { 
+        let val = val & 0xFFF0;
+        self.AF.set(val);
+    }
 
     fn set_HL(&mut self, val: usize) { self.HL.set(val); }
 
@@ -1501,6 +1548,11 @@ impl SM83 {
     fn inc_PC(&mut self, val: usize) { self.PC.set(self.PC() + val); }
 
     fn set_SP(&mut self, val: usize) { self.SP.set(val); }
+
+    fn cflag(&self) -> bool { self.AF.bit(4) }
+    fn hflag(&self) -> bool { self.AF.bit(5) }
+    fn nflag(&self) -> bool { self.AF.bit(6) }
+    fn zflag(&self) -> bool { self.AF.bit(7) }
 
     fn set_cflag(&mut self, val: bool) { self.AF.set_bit(4, val); }
     fn set_hflag(&mut self, val: bool) { self.AF.set_bit(5, val); }
