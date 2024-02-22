@@ -2,7 +2,7 @@
 use std::fs::File;
 use std::io::{self, Read};
 
-use crate::mmu::MMU;
+use crate::mmu::Mmu;
 use crate::register::Register;
 
 
@@ -19,31 +19,33 @@ fn log_to_file(message: &str) -> std::io::Result<()> {
     writeln!(file, "{}", message)
 }
 
-pub struct SM83 {
+pub struct Sm83 {
     AF: Register,
     BC: Register,
     DE: Register,
     HL: Register,
     PC: Register,
     SP: Register,
-    pub memory: MMU,
+    ime: bool,
+    pub memory: Mmu,
 }
 
-impl SM83 {
+impl Sm83 {
     pub fn new() -> Self {
-        SM83 { 
+        Sm83 { 
             AF: Register(0x01B0),
             BC: Register(0x0013),
             DE: Register(0x00D8),
             HL: Register(0x014D),
             PC: Register(0x0100),
             SP: Register(0xFFFE),
-            memory: MMU::new(),
+            ime: false,
+            memory: Mmu::new(),
         }
     }
 
     pub fn load_rom(&mut self, rom_path: &str) {
-        match SM83::read_rom_from_file(rom_path) {
+        match Sm83::read_rom_from_file(rom_path) {
             Ok(rom_data) => {
                 for i in 0..rom_data.len() {
                     self.memory.write_byte(i, rom_data[i]);
@@ -59,6 +61,7 @@ impl SM83 {
         }
     }
 
+    // TODO: MOVE TO MMU
     fn read_rom_from_file(file_path: &str) -> io::Result<Vec<u8>> {
         let mut file = File::open(file_path)?;
 
@@ -360,30 +363,6 @@ impl SM83 {
             _ => panic!("Unknown Opcode Encountered! {:#03x}", opcode),
         }
     }
-
-    // fn handle_interrupts(&mut self) {
-    //     if self.interrupts_enabled {
-    //         let if_reg = self.memory.read_byte(0xFF0F); // Interrupt Flags
-    //         let ie_reg = self.memory.read_byte(0xFFFF); // Interrupt Enable
-    
-    //         for i in 0..5 {
-    //             let mask = 1 << i;
-    //             if if_reg & mask != 0 && ie_reg & mask != 0 {
-    //                 self.interrupts_enabled = false;
-    //                 self.memory.write_byte(0xFF0F, if_reg & !mask); // Reset IF flag
-    //                 self.PC() = match i {
-    //                     0 => 0x40, // V-Blank
-    //                     1 => 0x48, // LCD STAT
-    //                     2 => 0x50, // Timer
-    //                     3 => 0x58, // Serial
-    //                     4 => 0x60, // Joypad
-    //                     _ => unreachable!(),
-    //                 };
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // }
 
     fn nop(&mut self) -> u8 {
         1

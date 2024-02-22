@@ -1,26 +1,38 @@
+use crate::sdl2::Sdl2Wrapper;
+use crate::timer::Timer;
+use crate::rom::Rom;
 
+const WRAM_SIZE: usize = 0x2000;
+const HRAM_SIZE: usize = 0x0080;
 
-const MEMORY_SIZE: usize = 0x10000;
-
-pub struct MMU {
-    memory: [u8; MEMORY_SIZE]
+pub struct Mmu {
+    rom: Rom,
+    sdl2_wrapper: Sdl2Wrapper, 
+    wram: [u8; WRAM_SIZE],
+    timer: Timer, 
+    hram: [u8; HRAM_SIZE],
+    interrupt_enable: u8,
 }
 
-impl MMU {
+impl Mmu {
     pub fn new() -> Self {
-        MMU {
-            memory: [0; MEMORY_SIZE]
+        Mmu {
+            rom: Rom::new(),
+            sdl2_wrapper: Sdl2Wrapper::new(),
+            timer: Timer::new(),
+            wram: [0; WRAM_SIZE],
+            hram: [0; HRAM_SIZE],
+            interrupt_enable: 0,
         }
     }
 
     pub fn read_byte(&self, addr: usize) -> u8 {
         // FOR TESTING
         if addr == 0xFF44 {
-            return 0x90;
+            return 0x90
         }
 
-        // println!("reading byte at memory address: {:#06x}", addr);
-        self.memory[addr]
+        0
     }
 
     pub fn read_word(&self, addr: usize) -> u16{
@@ -30,8 +42,7 @@ impl MMU {
     }
 
     pub fn write_byte(&mut self, addr: usize, byte: u8) {
-        // println!("writing memory at address: {:#06x} with byte: {:#04x}", addr, byte);
-        self.memory[addr] = byte;
+
     }
 
     pub fn write_word(&mut self, addr: usize, word: u16) {

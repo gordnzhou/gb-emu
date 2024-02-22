@@ -1,20 +1,15 @@
 mod register;
 mod cpu;
 mod mmu;
+mod sdl2;
+mod timer;
+mod rom;
 
-use cpu::SM83;
+use cpu::Sm83;
 use std::io::{stdin, stdout, Read, Write};
 use std::fs::OpenOptions;
 
 const ROM_PATH: &str = "roms/11-op a,(hl).gb";
-
-// FOR TESTING
-fn pause() {
-    let mut stdout = stdout();
-    stdout.write(b"Press Enter to continue...").unwrap();
-    stdout.flush().unwrap();
-    stdin().read(&mut [0]).unwrap();
-}
 
 // FOR TESTING
 fn clear_log_file() -> std::io::Result<()> {
@@ -29,7 +24,7 @@ fn clear_log_file() -> std::io::Result<()> {
 fn main() {
     println!("Hello, world!");
 
-    let mut sm83 = SM83::new();
+    let mut sm83 = Sm83::new();
     sm83.load_rom(ROM_PATH);
 
     // FOR TESTING
