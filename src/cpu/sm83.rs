@@ -9,16 +9,6 @@ use crate::register::Register;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 
-// FOR TESTING
-fn log_to_file(message: &str) -> std::io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("logs/log.txt")?;
-    
-    writeln!(file, "{}", message)
-}
-
 pub struct Sm83 {
     AF: Register,
     BC: Register,
@@ -48,7 +38,7 @@ impl Sm83 {
         match Sm83::read_rom_from_file(rom_path) {
             Ok(rom_data) => {
                 for i in 0..rom_data.len() {
-                    self.memory.write_byte(i, rom_data[i]);
+                    self.memory.write_byte(i as u16, rom_data[i]);
                 }
 
                 println!("Sucessfully read ROM starting at memory address {:#06x}", 0);
@@ -454,7 +444,7 @@ impl Sm83 {
         let e8 = self.e8() as i16;
         let mut pc = self.PC() as i16;
         pc = pc.wrapping_add(e8);
-        self.set_PC((pc as u16) as usize);
+        self.set_PC(pc as u16);
         3
     }
 
@@ -464,12 +454,12 @@ impl Sm83 {
 
         if cc {
             pc = pc.wrapping_add(e8);
-            self.set_PC((pc as u16) as usize);
+            self.set_PC(pc as u16);
             3
         } else { 2 }
     }
 
-    fn rst(&mut self, vec: usize) -> u8 {
+    fn rst(&mut self, vec: u16) -> u8 {
         self.push_stack(self.PC());
         self.set_PC(vec);
         4
@@ -529,14 +519,14 @@ impl Sm83 {
         4
     }
 
-    fn pop_stack(&mut self) -> usize {
+    fn pop_stack(&mut self) -> u16 {
         let sp = self.SP();
         let res = self.memory.read_word(sp);
         self.set_SP(sp.wrapping_add(2));
-        res as usize
+        res as u16
     }
 
-    fn push_stack(&mut self, val16: usize) {
+    fn push_stack(&mut self, val16: u16) {
         let hi = ((val16 & 0xFF00) >> 8) as u8;
         let lo = val16 as u8;
         let sp = self.SP();
@@ -650,25 +640,25 @@ impl Sm83 {
     }
 
     fn ldh_n16_a(&mut self) -> u8 {
-        let n16 = 0xFF00 | (self.n8() as usize);
+        let n16 = 0xFF00 | (self.n8() as u16);
         self.memory.write_byte(n16, self.A());
         3
     }
 
     fn ldh_a_n16(&mut self) -> u8 {
-        let n16 = 0xFF00 | (self.n8() as usize);
+        let n16 = 0xFF00 | (self.n8() as u16);
         self.set_A(self.memory.read_byte(n16));
         3
     }
 
     fn ldh_c_a(&mut self) -> u8 {
-        let c = 0xFF00 | self.C() as usize;
+        let c = 0xFF00 | self.C() as u16;
         self.memory.write_byte(c, self.A());
         2
     }
 
     fn ldh_a_c(&mut self) -> u8 {
-        let c = 0xFF00 | self.C() as usize;
+        let c = 0xFF00 | self.C() as u16;
         self.set_A(self.memory.read_byte(c));
         2
     }
@@ -727,7 +717,7 @@ impl Sm83 {
 
     fn dec_r16(&mut self, r16_name: &str) -> u8 {
         let r16 = self.r16(r16_name) as u16;
-        self.set_r16(r16_name, r16.wrapping_sub(1) as usize);
+        self.set_r16(r16_name, r16.wrapping_sub(1));
         2
     }
 
@@ -749,7 +739,7 @@ impl Sm83 {
 
     fn inc_r16(&mut self, r16_name: &str) -> u8 {
         let r16 = self.r16(r16_name) as u16;
-        self.set_r16(r16_name, r16.wrapping_add(1) as usize);
+        self.set_r16(r16_name, r16.wrapping_add(1));
         2
     }
 
@@ -897,7 +887,7 @@ impl Sm83 {
         2
     }
 
-    fn add_hl_r16(&mut self, r16: usize) -> u8 {
+    fn add_hl_r16(&mut self, r16: u16) -> u8 {
         let r16 = r16 as u32;
         let res = self.add16_and_set_flags(self.HL() as u32, r16);
         self.set_HL(res);
@@ -911,12 +901,12 @@ impl Sm83 {
     }
 
     // TODO
-    fn sp_offset_and_set_flags(&mut self) -> usize {
+    fn sp_offset_and_set_flags(&mut self) -> u16 {
         let sp = self.SP() as i32;
         let e8 = self.e8() as i32;
         let res = sp.wrapping_add(e8);
         self.set_all_flags(false, false, (sp ^ e8 ^ res) & 0x10 != 0, (sp ^ e8 ^ res) & 0x100 != 0);
-        (res as u16) as usize
+        res as u16
     }
 
     fn adc_a_r8(&mut self, r8: u8) -> u8 {
@@ -940,10 +930,10 @@ impl Sm83 {
         2
     }
 
-    fn add16_and_set_flags(&mut self, a: u32, b: u32) -> usize {
+    fn add16_and_set_flags(&mut self, a: u32, b: u32) -> u16 {
         let r: u32 = a.wrapping_add(b);
         self.set_all_flags(self.zflag(), false, (a ^ b ^ r) & 0x1000 != 0, r & 0x10000 != 0);
-        r as usize
+        r as u16
     }
 
     fn sub_and_set_flags(&mut self, a: u32, b: u32, withCarry: bool) -> u8 {
@@ -1420,9 +1410,9 @@ impl Sm83 {
         res
     }
 
-    fn n16(&mut self) -> usize {
-        let lo = self.n8() as usize;
-        let hi = self.n8() as usize;
+    fn n16(&mut self) -> u16 {
+        let lo = self.n8() as u16;
+        let hi = self.n8() as u16;
         (hi << 8) | lo
     }
 
@@ -1476,7 +1466,7 @@ impl Sm83 {
         }
     }
 
-    fn r16(&self, name: &str) -> usize {
+    fn r16(&self, name: &str) -> u16 {
         match name {
             "BC" => { self.BC.full() },
             "DE" => { self.DE.full() },
@@ -1487,7 +1477,7 @@ impl Sm83 {
         }
     }
 
-    fn set_r16(&mut self, name: &str, val: usize) {
+    fn set_r16(&mut self, name: &str, val: u16) {
         match name {
             "BC" => { self.BC.set(val) },
             "DE" => { self.DE.set(val) },
@@ -1507,26 +1497,26 @@ impl Sm83 {
     fn H(&self) -> u8 { self.HL.hi() }
     fn L(&self) -> u8 { self.HL.lo() }
 
-    fn AF(&self) -> usize { self.AF.full() }
-    fn BC(&self) -> usize { self.BC.full() }
-    fn DE(&self) -> usize { self.DE.full() }
-    fn HL(&self) -> usize { self.HL.full() }
-    fn PC(&self) -> usize { self.PC.full() }
-    fn SP(&self) -> usize { self.SP.full() }
+    fn AF(&self) -> u16 { self.AF.full() }
+    fn BC(&self) -> u16 { self.BC.full() }
+    fn DE(&self) -> u16 { self.DE.full() }
+    fn HL(&self) -> u16 { self.HL.full() }
+    fn PC(&self) -> u16 { self.PC.full() }
+    fn SP(&self) -> u16 { self.SP.full() }
 
     fn set_A(&mut self, val: u8) { self.AF.set_hi(val); }
 
-    fn set_AF(&mut self, val: usize) { 
+    fn set_AF(&mut self, val: u16) { 
         let val = val & 0xFFF0;
         self.AF.set(val);
     }
 
-    fn set_HL(&mut self, val: usize) { self.HL.set(val); }
+    fn set_HL(&mut self, val: u16) { self.HL.set(val); }
 
-    fn set_PC(&mut self, val: usize) { self.PC.set(val); }
-    fn inc_PC(&mut self, val: usize) { self.PC.set(self.PC() + val); }
+    fn set_PC(&mut self, val: u16) { self.PC.set(val); }
+    fn inc_PC(&mut self, val: u16) { self.PC.set(self.PC() + val); }
 
-    fn set_SP(&mut self, val: usize) { self.SP.set(val); }
+    fn set_SP(&mut self, val: u16) { self.SP.set(val); }
 
     fn cflag(&self) -> bool { self.AF.bit(4) }
     fn hflag(&self) -> bool { self.AF.bit(5) }
@@ -1537,4 +1527,14 @@ impl Sm83 {
     fn set_hflag(&mut self, val: bool) { self.AF.set_bit(5, val); }
     fn set_nflag(&mut self, val: bool) { self.AF.set_bit(6, val); }
     fn set_zflag(&mut self, val: bool) { self.AF.set_bit(7, val); }
+}
+
+// FOR TESTING
+fn log_to_file(message: &str) -> std::io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("logs/log.txt")?;
+    
+    writeln!(file, "{}", message)
 }

@@ -29,7 +29,7 @@ fn main() {
 
     // FOR TESTING
     clear_log_file().unwrap();
-    let mut lines = 100;
+    let mut lines = 7430000;
     while lines > 0 {
         let _ = sm83.fetch_execute();
         lines -= 1;

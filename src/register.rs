@@ -1,7 +1,7 @@
-pub struct Register(pub usize);
+pub struct Register(pub u16);
 
 impl Register {
-    pub fn full(&self) -> usize {
+    pub fn full(&self) -> u16 {
         self.0
     }
 
@@ -17,16 +17,16 @@ impl Register {
         self.0 & (1 << k) != 0
     }
 
-    pub fn set(&mut self, val: usize) {
+    pub fn set(&mut self, val: u16) {
         self.0 = val;
     }
 
     pub fn set_hi(&mut self, val: u8) {
-        self.0 = ((val as usize) << 8) + self.lo() as usize;
+        self.0 = ((val as u16) << 8) + self.lo() as u16;
     }
 
     pub fn set_lo(&mut self, val: u8) {
-        self.0 = ((self.hi() as usize) << 8) + val as usize;
+        self.0 = ((self.hi() as u16) << 8) + val as u16;
     }
 
     pub fn set_bit(&mut self, k: usize, val: bool) {
