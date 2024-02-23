@@ -13,4 +13,20 @@ impl Rom {
             eram: [0; ERAM_SIZE],
         }
     }
+
+    pub fn read_rom(&self, addr: usize) -> u8 {
+        self.rom[addr]
+    }
+
+    pub fn write_rom(&mut self, addr: usize, byte: u8) {
+        self.rom[addr] = byte;
+    }
+
+    pub fn read_eram(&self, addr: usize) -> u8 {
+        self.eram[addr - 0xA000]
+    }
+
+    pub fn write_eram(&mut self, addr: usize, byte: u8) {
+        self.eram[addr - 0xA000] = byte;
+    }
 }

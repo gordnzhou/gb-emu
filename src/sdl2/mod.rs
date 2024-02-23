@@ -7,9 +7,9 @@ use apu::Apu;
 use ppu::Ppu;
 
 pub struct Sdl2Wrapper {
-    joypad: Joypad,
-    apu: Apu,
-    ppu: Ppu,
+    pub joypad: Joypad,
+    pub apu: Apu,
+    pub ppu: Ppu,
 }
 
 impl Sdl2Wrapper {
@@ -19,5 +19,11 @@ impl Sdl2Wrapper {
             apu: Apu::new(),
             ppu: Ppu::new(),
         }
+    }
+
+    pub fn step(&mut self) {
+        self.ppu.step();
+        self.apu.step();
+        self.joypad.step();
     }
 }

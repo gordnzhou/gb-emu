@@ -5,8 +5,9 @@ mod sdl2;
 mod timer;
 mod rom;
 
-use cpu::Sm83;
-use std::io::{stdin, stdout, Read, Write};
+use cpu::Cpu;
+
+use std::io::Write;
 use std::fs::OpenOptions;
 
 const ROM_PATH: &str = "roms/11-op a,(hl).gb";
@@ -24,14 +25,14 @@ fn clear_log_file() -> std::io::Result<()> {
 fn main() {
     println!("Hello, world!");
 
-    let mut sm83 = Sm83::new();
-    sm83.load_rom(ROM_PATH);
+    let mut cpu = Cpu::new();
+    cpu.load_rom(ROM_PATH);
 
     // FOR TESTING
     clear_log_file().unwrap();
     let mut lines = 7430000;
     while lines > 0 {
-        let _ = sm83.fetch_execute();
+        let _ = cpu.step();
         lines -= 1;
     }
 }

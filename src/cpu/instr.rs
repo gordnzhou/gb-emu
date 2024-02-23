@@ -1,79 +1,15 @@
 #![allow(non_snake_case)]
-use std::fs::File;
-use std::io::{self, Read};
+use super::Cpu;
 
-use crate::mmu::Mmu;
-use crate::register::Register;
-
-
-use std::fs::OpenOptions;
-use std::io::prelude::*;
-
-pub struct Sm83 {
-    AF: Register,
-    BC: Register,
-    DE: Register,
-    HL: Register,
-    PC: Register,
-    SP: Register,
-    ime: bool,
-    pub memory: Mmu,
-}
-
-impl Sm83 {
-    pub fn new() -> Self {
-        Sm83 { 
-            AF: Register(0x01B0),
-            BC: Register(0x0013),
-            DE: Register(0x00D8),
-            HL: Register(0x014D),
-            PC: Register(0x0100),
-            SP: Register(0xFFFE),
-            ime: false,
-            memory: Mmu::new(),
-        }
-    }
-
-    pub fn load_rom(&mut self, rom_path: &str) {
-        match Sm83::read_rom_from_file(rom_path) {
-            Ok(rom_data) => {
-                for i in 0..rom_data.len() {
-                    self.memory.write_byte(i as u16, rom_data[i]);
-                }
-
-                println!("Sucessfully read ROM starting at memory address {:#06x}", 0);
-                println!("ROM size: {} bytes", rom_data.len());
-                println!("First bytes: {:?}", &rom_data[..16]);
-            }
-            Err(err) => {
-                eprintln!("Error reading ROM file: {}", err);
-            }
-        }
-    }
-
-    // TODO: MOVE TO MMU
-    fn read_rom_from_file(file_path: &str) -> io::Result<Vec<u8>> {
-        let mut file = File::open(file_path)?;
-
-        let mut rom_data = Vec::new();
-        file.read_to_end(&mut rom_data)?;
-
-        Ok(rom_data)
-    }
-
-    // all 0xFFFF memory slots: read and write
-    // AF, BC, DE, HL, PC, SP registers: read and write (includes flag registers)
-    // call stack: push and pop
-    // write-only IME flag (handles interrupts)
-    // returns the number of clock M-cycles
-    pub fn fetch_execute(&mut self) -> u8 {
+impl Cpu {
+    pub(super) fn execute_next_instruction(&mut self) -> u8 {
         let opcode = self.memory.read_byte(self.PC());
-
+        
         // FOR TESTING
-        let log_message = format!("A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}", 
-            self.A(), self.AF.lo(), self.B(), self.C(), self.D(), self.E(), self.H(), self.L(),
-            self.SP(), self.PC(), opcode, self.memory.read_byte(self.PC() + 1), self.memory.read_byte(self.PC() + 2), self.memory.read_byte(self.PC() + 3));  
-        log_to_file(&log_message).unwrap();
+        // let log_message = format!("A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}", 
+        //     self.A(), self.AF() as u8, self.B(), self.C(), self.D(), self.E(), self.H(), self.L(),
+        //     self.SP(), self.PC(), opcode, self.memory.read_byte(self.PC() + 1), self.memory.read_byte(self.PC() + 2), self.memory.read_byte(self.PC() + 3));  
+        // log_to_file(&log_message).unwrap();
 
         self.inc_PC(1);
 
@@ -355,6 +291,7 @@ impl Sm83 {
     }
 
     fn nop(&mut self) -> u8 {
+        // NO OPERATION
         1
     }
 
@@ -366,21 +303,20 @@ impl Sm83 {
     }
 
     fn ei(&mut self) -> u8 {
-        // TODO
-        // schedules IME after next cycle
+        // TODO: schedules IME after next cycle
+        self.ime = true;
         1
     }
 
     fn di(&mut self) -> u8 {
-        // TODO
-        // set IME to false
-        // cancel scheduled EI interrupts
+        // TODO: cancel scheduled EI interrupts
+        self.ime = false;
         1
     }
 
     fn halt(&mut self) -> u8 {
         // TODO
-        // halt system clock
+        self.halted = true;
         1
     }
 
@@ -900,7 +836,6 @@ impl Sm83 {
         4
     }
 
-    // TODO
     fn sp_offset_and_set_flags(&mut self) -> u16 {
         let sp = self.SP() as i32;
         let e8 = self.e8() as i32;
@@ -936,15 +871,15 @@ impl Sm83 {
         r as u16
     }
 
-    fn sub_and_set_flags(&mut self, a: u32, b: u32, withCarry: bool) -> u8 {
-        let carry: u32 = if withCarry { self.cflag() as u32 } else { 0 };
+    fn sub_and_set_flags(&mut self, a: u32, b: u32, with_carry: bool) -> u8 {
+        let carry: u32 = if with_carry { self.cflag() as u32 } else { 0 };
         let r: u32 = a.wrapping_sub(b).wrapping_sub(carry);
         self.set_all_flags(r as u8 == 0, true, (a ^ b ^ r) & 0x10 != 0, r & 0x100 != 0);
         r as u8
     }
 
-    fn add_and_set_flags(&mut self, a: u32, b: u32, withCarry: bool) -> u8 {
-        let carry: u32 = if withCarry { self.cflag() as u32 } else { 0 };
+    fn add_and_set_flags(&mut self, a: u32, b: u32, with_carry: bool) -> u8 {
+        let carry: u32 = if with_carry { self.cflag() as u32 } else { 0 };
         let r = a.wrapping_add(b).wrapping_add(carry);
         self.set_all_flags(r as u8 == 0, false, (a ^ b ^ r) & 0x10 != 0, r & 0x100 != 0);
         r as u8
@@ -1441,100 +1376,87 @@ impl Sm83 {
 
     fn r8(&self, name: &str) -> u8 {
         match name {
-            "A" => { self.AF.hi() },
-            "F" => { self.AF.lo() },
-            "B" => { self.BC.hi() },
-            "C" => { self.BC.lo() },
-            "D" => { self.DE.hi() },
-            "E" => { self.DE.lo() }
-            "H" => { self.HL.hi() },
-            "L" => { self.HL.lo() }
+            "A" => { self.af.hi() },
+            "F" => { self.af.lo() },
+            "B" => { self.bc.hi() },
+            "C" => { self.bc.lo() },
+            "D" => { self.de.hi() },
+            "E" => { self.de.lo() }
+            "H" => { self.hl.hi() },
+            "L" => { self.hl.lo() }
             _ => panic!("Invalid register name: {}", name)
         }
     }
 
     fn set_r8(&mut self, name: &str, val: u8) {
         match name {
-            "A" => { self.AF.set_hi(val) },
-            "B" => { self.BC.set_hi(val) },
-            "C" => { self.BC.set_lo(val) },
-            "D" => { self.DE.set_hi(val) },
-            "E" => { self.DE.set_lo(val) }
-            "H" => { self.HL.set_hi(val) },
-            "L" => { self.HL.set_lo(val) }
+            "A" => { self.af.set_hi(val) },
+            "B" => { self.bc.set_hi(val) },
+            "C" => { self.bc.set_lo(val) },
+            "D" => { self.de.set_hi(val) },
+            "E" => { self.de.set_lo(val) }
+            "H" => { self.hl.set_hi(val) },
+            "L" => { self.hl.set_lo(val) }
             _ => panic!("Invalid register name: {}", name)
         }
     }
 
     fn r16(&self, name: &str) -> u16 {
         match name {
-            "BC" => { self.BC.full() },
-            "DE" => { self.DE.full() },
-            "HL" => { self.HL.full() },
-            "PC" => { self.PC.full() },
-            "SP" => { self.SP.full() },
+            "BC" => { self.BC() },
+            "DE" => { self.DE() },
+            "HL" => { self.HL() },
+            "PC" => { self.PC() },
+            "SP" => { self.SP() },
             _ => panic!("Invalid register name: {}", name)
         }
     }
 
     fn set_r16(&mut self, name: &str, val: u16) {
         match name {
-            "BC" => { self.BC.set(val) },
-            "DE" => { self.DE.set(val) },
-            "HL" => { self.HL.set(val) },
-            "PC" => { self.PC.set(val) },
-            "SP" => { self.SP.set(val) },
+            "BC" => { self.bc.set(val) },
+            "DE" => { self.de.set(val) },
+            "HL" => { self.set_HL(val) },
+            "PC" => { self.set_PC(val) },
+            "SP" => { self.set_SP(val) },
             _ => panic!("Invalid register name: {}", name)
         }
     }
 
-    // Register and Flag Getters
-    fn A(&self) -> u8 { self.AF.hi() }
-    fn B(&self) -> u8 { self.BC.hi() }
-    fn C(&self) -> u8 { self.BC.lo() }
-    fn D(&self) -> u8 { self.DE.hi() }
-    fn E(&self) -> u8 { self.DE.lo() }
-    fn H(&self) -> u8 { self.HL.hi() }
-    fn L(&self) -> u8 { self.HL.lo() }
+    fn A(&self) -> u8 { self.af.hi() }
+    fn B(&self) -> u8 { self.bc.hi() }
+    fn C(&self) -> u8 { self.bc.lo() }
+    fn D(&self) -> u8 { self.de.hi() }
+    fn E(&self) -> u8 { self.de.lo() }
+    fn H(&self) -> u8 { self.hl.hi() }
+    fn L(&self) -> u8 { self.hl.lo() }
 
-    fn AF(&self) -> u16 { self.AF.full() }
-    fn BC(&self) -> u16 { self.BC.full() }
-    fn DE(&self) -> u16 { self.DE.full() }
-    fn HL(&self) -> u16 { self.HL.full() }
-    fn PC(&self) -> u16 { self.PC.full() }
-    fn SP(&self) -> u16 { self.SP.full() }
+    fn AF(&self) -> u16 { self.af.full() }
+    fn BC(&self) -> u16 { self.bc.full() }
+    fn DE(&self) -> u16 { self.de.full() }
+    fn HL(&self) -> u16 { self.hl.full() }
+    fn PC(&self) -> u16 { self.pc.full() }
+    fn SP(&self) -> u16 { self.sp.full() }
 
-    fn set_A(&mut self, val: u8) { self.AF.set_hi(val); }
-
+    fn set_A(&mut self, val: u8) { self.af.set_hi(val); }
     fn set_AF(&mut self, val: u16) { 
         let val = val & 0xFFF0;
-        self.AF.set(val);
+        self.af.set(val);
     }
 
-    fn set_HL(&mut self, val: u16) { self.HL.set(val); }
+    fn set_HL(&mut self, val: u16) { self.hl.set(val); }
 
-    fn set_PC(&mut self, val: u16) { self.PC.set(val); }
-    fn inc_PC(&mut self, val: u16) { self.PC.set(self.PC() + val); }
+    fn set_PC(&mut self, val: u16) { self.pc.set(val); }
+    fn inc_PC(&mut self, val: u16) { self.pc.set(self.PC() + val); }
+    fn set_SP(&mut self, val: u16) { self.sp.set(val); }
 
-    fn set_SP(&mut self, val: u16) { self.SP.set(val); }
+    fn cflag(&self) -> bool { self.af.bit(4) }
+    fn hflag(&self) -> bool { self.af.bit(5) }
+    fn nflag(&self) -> bool { self.af.bit(6) }
+    fn zflag(&self) -> bool { self.af.bit(7) }
 
-    fn cflag(&self) -> bool { self.AF.bit(4) }
-    fn hflag(&self) -> bool { self.AF.bit(5) }
-    fn nflag(&self) -> bool { self.AF.bit(6) }
-    fn zflag(&self) -> bool { self.AF.bit(7) }
-
-    fn set_cflag(&mut self, val: bool) { self.AF.set_bit(4, val); }
-    fn set_hflag(&mut self, val: bool) { self.AF.set_bit(5, val); }
-    fn set_nflag(&mut self, val: bool) { self.AF.set_bit(6, val); }
-    fn set_zflag(&mut self, val: bool) { self.AF.set_bit(7, val); }
-}
-
-// FOR TESTING
-fn log_to_file(message: &str) -> std::io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("logs/log.txt")?;
-    
-    writeln!(file, "{}", message)
+    fn set_cflag(&mut self, val: bool) { self.af.set_bit(4, val); }
+    fn set_hflag(&mut self, val: bool)  { self.af.set_bit(5, val); }
+    fn set_nflag(&mut self, val: bool) { self.af.set_bit(6, val); }
+    fn set_zflag(&mut self, val: bool) { self.af.set_bit(7, val); }
 }
