@@ -1,6 +1,9 @@
-use crate::sdl2::Sdl2Wrapper;
+use crate::ui::Sdl2Wrapper;
 use crate::timer::Timer;
 use crate::rom::Rom;
+
+use std::fs::File;
+use std::io::{self, Read};
 
 const WRAM_SIZE: usize = 0x2000;
 const HRAM_SIZE: usize = 0x0080;
@@ -20,10 +23,10 @@ pub struct Mmu {
 }
 
 impl Mmu {
-    pub fn new() -> Self {
+    pub fn new(sdl2_wrapper: Sdl2Wrapper) -> Self {
         Mmu {
             rom: Rom::new(),
-            sdl2_wrapper: Sdl2Wrapper::new(),
+            sdl2_wrapper,
             timer: Timer::new(),
             wram: [0; WRAM_SIZE],
             hram: [0; HRAM_SIZE],
@@ -95,14 +98,16 @@ impl Mmu {
             0xFF07 => self.timer.write_tac(byte),
             0xFF0F => self.interrupt_flag = byte,
             
-        
             0xFF40 => self.sdl2_wrapper.ppu.write_lcdc(byte),
             0xFF41 => self.sdl2_wrapper.ppu.write_stat(byte),
             0xFF42 => self.sdl2_wrapper.ppu.write_scy(byte),
             0xFF43 => self.sdl2_wrapper.ppu.write_scx(byte),
             0xFF44 => {},
             0xFF45 => self.sdl2_wrapper.ppu.write_lyc(byte),
-            0xFF46 => self.sdl2_wrapper.ppu.write_dma(byte),
+            0xFF46 => { 
+                self.sdl2_wrapper.ppu.write_dma(byte); 
+                // self.transfer_to_oam(byte as u16 >> 8);
+            },
             0xFF47 => self.sdl2_wrapper.ppu.write_bgp(byte),
             0xFF48 => self.sdl2_wrapper.ppu.write_obp0(byte),
             0xFF49 => self.sdl2_wrapper.ppu.write_obp1(byte),
@@ -118,5 +123,43 @@ impl Mmu {
     pub fn write_word(&mut self, addr: u16, word: u16) {
         self.write_byte(addr, word as u8);
         self.write_byte(addr.wrapping_add(1), (word >> 8) as u8);
+    }
+
+    /// TODO: Starts a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
+    /// after for 160 M-cycles (640 dots). Disables read/writes to 
+    /// all of memory, except for HRAM.
+    #[allow(dead_code)]
+    pub fn transfer_to_oam(&mut self, start: u16) {
+        // self.dma_locked = 160;
+        for i in 0x00..=0x9F {
+            let byte = self.read_byte(start | i);
+            self.write_byte(0xFE00 | i, byte);
+        }
+    }
+
+    pub fn load_rom(&mut self, rom_path: &str) {
+        match Mmu::read_rom_from_file(rom_path) {
+            Ok(rom_data) => {
+                for i in 0..rom_data.len() {
+                    self.write_byte(i as u16, rom_data[i]);
+                }
+
+                println!("Sucessfully read ROM starting at memory address {:#06x}", 0);
+                println!("ROM size: {} bytes", rom_data.len());
+                println!("First bytes: {:?}", &rom_data[..16]);
+            }
+            Err(err) => {
+                eprintln!("Error reading ROM file: {}", err);
+            }
+        }
+    }
+
+    fn read_rom_from_file(file_path: &str) -> io::Result<Vec<u8>> {
+        let mut file = File::open(file_path)?;
+
+        let mut rom_data = Vec::new();
+        file.read_to_end(&mut rom_data)?;
+
+        Ok(rom_data)
     }
 }

@@ -1,18 +1,26 @@
+extern crate sdl2;
+
 mod register;
 mod cpu;
 mod mmu;
-mod sdl2;
+mod ui;
 mod timer;
 mod rom;
+mod emulator;
 
 use cpu::Cpu;
+use emulator::Emulator;
+use mmu::Mmu;
+use ui::Sdl2Wrapper;
 
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/11-op a,(hl).gb";
+const ROM_PATH: &str = "roms/01-special.gb";
+const SCREEN_SCALE: i32 = 3;
 
 // FOR TESTING
+#[allow(dead_code)]
 fn clear_log_file() -> std::io::Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
@@ -22,17 +30,19 @@ fn clear_log_file() -> std::io::Result<()> {
     writeln!(file, "")
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     println!("Hello, world!");
 
-    let mut cpu = Cpu::new();
-    cpu.load_rom(ROM_PATH);
+    let sdl2_wrapper = Sdl2Wrapper::new(SCREEN_SCALE)?;
 
-    // FOR TESTING
-    clear_log_file().unwrap();
-    let mut lines = 7430000;
-    while lines > 0 {
-        let _ = cpu.step();
-        lines -= 1;
-    }
+    let mut mmu = Mmu::new(sdl2_wrapper);
+    mmu.load_rom(ROM_PATH);
+
+    let cpu = Cpu::new(mmu);
+
+    let mut emulator = Emulator::new(cpu);
+
+    emulator.debug_run(5e9 as u64);
+
+    Ok(())
 }

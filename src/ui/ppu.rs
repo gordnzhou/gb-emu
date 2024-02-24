@@ -1,5 +1,11 @@
+
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0x00A0;
+
+const LCD_WIDTH: usize= 160;
+const LCD_HEIGHT: usize = 144;
+
+// const COLOURS: [Sdl2; 4] = 
 
 pub struct Ppu {
     // 16-byte types stored here
@@ -17,6 +23,11 @@ pub struct Ppu {
     obp1: u8,
     wy: u8,
     wx: u8,
+
+    // frame buffer representing the LCD screen that will be
+    // displayed on canvas at 60 Hz 
+    pub frame_buffer: [[u8; LCD_WIDTH]; LCD_HEIGHT],
+    mode: u8,
 }
 
 impl Ppu {
@@ -36,6 +47,9 @@ impl Ppu {
             obp1: 0,
             wy: 0,
             wx: 0,
+
+            frame_buffer: [[0; LCD_WIDTH]; LCD_HEIGHT],
+            mode: 0,
         }
     }
 
@@ -44,19 +58,33 @@ impl Ppu {
     }
 
     pub fn read_vram(&self, addr: usize) -> u8 {
-        self.vram[addr - 0x8000]
+        if self.mode != 3 {
+            self.vram[addr - 0x8000]
+        } else {
+            0xFF
+        }
+
     }
 
     pub fn write_vram(&mut self, addr: usize, byte: u8) {
-        self.vram[addr - 0x8000] = byte;
+        if self.mode != 3 { 
+            self.vram[addr - 0x8000] = byte;
+        }
     }
 
     pub fn read_oam(&self, addr: usize) -> u8 {
-        self.oam[addr - 0xFE00]
+        if self.mode != 3 && self.mode != 2 {
+            self.oam[addr - 0xFE00]
+        } else { 
+            0xFF
+        }
+        
     }
 
     pub fn write_oam(&mut self, addr: usize, byte: u8) {
-        self.oam[addr - 0xFE00] = byte;
+        if self.mode != 3 && self.mode != 2 {
+            self.oam[addr - 0xFE00] = byte;
+        }
     }
 
     pub fn read_lcdc(&self) -> u8 {
@@ -64,17 +92,17 @@ impl Ppu {
     }
 
     pub fn write_lcdc(&mut self, byte: u8) {
-        self.lcdc = byte;
+        self.lcdc = byte; 
     }
 
     pub fn read_stat(&self) -> u8 {
         self.stat
     }
 
-    /// Bottom two bits are read-only.
+    /// Bottom three bits are read-only.
     pub fn write_stat(&mut self, byte: u8) {
-        let stat = self.stat & 0x03;
-        self.stat = (byte & 0xFC) | stat;
+        let stat = self.stat & 0x07;
+        self.stat = (byte & 0xF8) | stat;
     }
 
     pub fn read_scy(&self) -> u8 {
@@ -112,8 +140,6 @@ impl Ppu {
         self.dma
     }
 
-    /// Writes to DMA register then starts a DMA transfer of bytes from 0xNN00-0xNN9F
-    /// to 0xFE00-0xFE9F (OAM) after current cpu instruction for 160 M-cycles (640 dots).
     pub fn write_dma(&mut self, byte: u8) {
         self.dma = byte
     }

@@ -1,16 +1,17 @@
 mod instr;
 
-use std::fs::File;
-use std::io::{self, Read};
-
 use crate::mmu::Mmu;
 use crate::register::Register;
+use crate::cpu::Interrupt::*;
 
 pub struct Cpu {
     pub memory: Mmu,
 
+    pub(self) scheduled_ei: bool,
     pub(self) ime: bool,
     pub(self) halted: bool,
+    pub(self) halt_bug: bool,
+
     pub(self) af: Register,
     pub(self) bc: Register,
     pub(self) de: Register,
@@ -19,51 +20,90 @@ pub struct Cpu {
     pub(self) sp: Register,
 }
 
+enum Interrupt {
+    VBlank,
+    Stat,
+    Timer,
+    Serial,
+    Joypad,
+}
+
 impl Cpu {
-    pub fn new() -> Self {
+    pub fn new(memory: Mmu) -> Self {
         Cpu { 
+            memory,
+            scheduled_ei: false,
+            ime: false,
+            halted: false,
+            halt_bug: false,
             af: Register(0x01B0),
             bc: Register(0x0013),
             de: Register(0x00D8),
             hl: Register(0x014D),
             pc: Register(0x0100),
             sp: Register(0xFFFE),
-            ime: false,
-            halted: false,
-            memory: Mmu::new(),
         }
     }
 
-    /// Returns the number of clock M-cycles.
+    /// Steps through all parts of the emulator over the period
+    /// that the next CPU instruction will take; returns the period length in M-cycles
     pub fn step(&mut self) -> u8 {
+        let cycles = self.cycle();
         self.memory.sdl2_wrapper.step();
-        self.execute_next_instruction()
+        cycles
     }
 
-    pub fn load_rom(&mut self, rom_path: &str) {
-        match Cpu::read_rom_from_file(rom_path) {
-            Ok(rom_data) => {
-                for i in 0..rom_data.len() {
-                    self.memory.write_byte(i as u16, rom_data[i]);
+    /// Do a CPU fetch-execute cycle and return the number of clock M-cycles taken.
+    fn cycle(&mut self) -> u8 {
+        if self.scheduled_ei {
+            self.ime = true;
+        }
+        
+        let mut cycles = if !self.halted {
+            self.execute_next_instruction()
+        } else {
+            1
+        };
+
+        match self.get_pending_interrupt() {
+            Some(interrupt) => {
+                if self.ime {
+                    cycles += self.handle_interrupt(interrupt);
+                } else if self.halted {
+                    self.halt_bug = true;
                 }
 
-                println!("Sucessfully read ROM starting at memory address {:#06x}", 0);
-                println!("ROM size: {} bytes", rom_data.len());
-                println!("First bytes: {:?}", &rom_data[..16]);
-            }
-            Err(err) => {
-                eprintln!("Error reading ROM file: {}", err);
-            }
+                self.ime = false;
+                self.halted = false;
+            },
+            None => {}
         }
+
+        cycles
     }
+    
+    /// Returns the next pending interrupt by priority; if one is found, resets its corresponding bit in IE.
+    fn get_pending_interrupt(&mut self) -> Option<Interrupt>{
+        let interrupt_enable: u8 =  self.memory.read_byte(0xFFFF);
+        let interrupt_flag: u8 = self.memory.read_byte(0xFF0F);
 
-    // TODO: MOVE TO MMU
-    fn read_rom_from_file(file_path: &str) -> io::Result<Vec<u8>> {
-        let mut file = File::open(file_path)?;
+        for bit in 0..=4 {   
+            if (interrupt_enable & (1 << bit) != 0) && (interrupt_flag & (1 << bit) != 0) {
+                self.memory.write_byte(0xFFFF, interrupt_enable & !(1 << bit));
 
-        let mut rom_data = Vec::new();
-        file.read_to_end(&mut rom_data)?;
+                let interrupt: Interrupt = match bit {
+                    0 => VBlank,
+                    1 => Stat,
+                    2 => Timer,
+                    3 => Serial,
+                    4 => Joypad,
+                    _ => unreachable!()
+                };
 
-        Ok(rom_data)
+                return Some(interrupt)
+            }
+        }   
+        
+        None
     }
 }

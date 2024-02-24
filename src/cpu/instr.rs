@@ -1,7 +1,12 @@
 #![allow(non_snake_case)]
-use super::Cpu;
+use super::{Cpu, Interrupt::*};
+use crate::cpu::Interrupt;
+
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 
 impl Cpu {
+    /// Execute the next instruction, returning number of clock M-cycles taken.
     pub(super) fn execute_next_instruction(&mut self) -> u8 {
         let opcode = self.memory.read_byte(self.PC());
         
@@ -11,9 +16,12 @@ impl Cpu {
         //     self.SP(), self.PC(), opcode, self.memory.read_byte(self.PC() + 1), self.memory.read_byte(self.PC() + 2), self.memory.read_byte(self.PC() + 3));  
         // log_to_file(&log_message).unwrap();
 
-        self.inc_PC(1);
+        if self.halt_bug {
+            self.halt_bug = false;
+        } else {
+            self.inc_PC(1);
+        }
 
-        // executes instruction and returns number of clock cycles
         match opcode {
             0x00 => self.nop(),
             0x01 => self.ld_r16_n16("BC"),
@@ -290,6 +298,22 @@ impl Cpu {
         }
     }
 
+    /// does a JUMP to interrupt vector and returns number of clock M-cycles taken.
+    pub(super) fn handle_interrupt(&mut self, interrupt: Interrupt) -> u8 {
+        self.push_stack(self.PC());
+
+        let jump_vector = match interrupt {
+            VBlank => 0x40,
+            Stat => 0x48, 
+            Timer => 0x50,
+            Serial => 0x58,
+            Joypad => 0x60,
+        };
+        self.set_PC(jump_vector);
+
+        5
+    }
+
     fn nop(&mut self) -> u8 {
         // NO OPERATION
         1
@@ -297,19 +321,19 @@ impl Cpu {
 
     fn stop(&mut self) -> u8 {
         let _ = self.n8();
-        // stop system and main clocks
         panic!("STOP Called");
+        // stop system and main clocks
         // 2
     }
 
     fn ei(&mut self) -> u8 {
-        // TODO: schedules IME after next cycle
-        self.ime = true;
+        if !self.ime {
+            self.scheduled_ei = true;
+        }
         1
     }
 
     fn di(&mut self) -> u8 {
-        // TODO: cancel scheduled EI interrupts
         self.ime = false;
         1
     }
@@ -323,8 +347,7 @@ impl Cpu {
     fn reti(&mut self) -> u8 {
         let res = self.pop_stack();
         self.set_PC(res);
-        // TODO
-        // set IME to true
+        self.ime = true;
         4
     }
 
@@ -1447,7 +1470,7 @@ impl Cpu {
     fn set_HL(&mut self, val: u16) { self.hl.set(val); }
 
     fn set_PC(&mut self, val: u16) { self.pc.set(val); }
-    fn inc_PC(&mut self, val: u16) { self.pc.set(self.PC() + val); }
+    fn inc_PC(&mut self, val: u16) { self.pc.set(self.PC().wrapping_add(val)); }
     fn set_SP(&mut self, val: u16) { self.sp.set(val); }
 
     fn cflag(&self) -> bool { self.af.bit(4) }
@@ -1459,4 +1482,15 @@ impl Cpu {
     fn set_hflag(&mut self, val: bool)  { self.af.set_bit(5, val); }
     fn set_nflag(&mut self, val: bool) { self.af.set_bit(6, val); }
     fn set_zflag(&mut self, val: bool) { self.af.set_bit(7, val); }
+}
+
+// FOR TESTING
+#[allow(dead_code)]
+fn log_to_file(message: &str) -> std::io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("logs/log.txt")?;
+
+    writeln!(file, "{}", message)
 }
