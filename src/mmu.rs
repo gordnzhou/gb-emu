@@ -1,6 +1,7 @@
 use crate::ui::Sdl2Wrapper;
 use crate::timer::Timer;
 use crate::rom::Rom;
+use crate::cpu::Interrupt;
 
 use std::fs::File;
 use std::io::{self, Read};
@@ -11,7 +12,7 @@ const TOTAL_SIZE: usize = 0x10000;
 
 pub struct Mmu {
     rom: Rom,
-    pub sdl2_wrapper: Sdl2Wrapper, 
+    pub(super) sdl2_wrapper: Sdl2Wrapper, 
     wram: [u8; WRAM_SIZE],
     timer: Timer, 
     hram: [u8; HRAM_SIZE],
@@ -19,7 +20,8 @@ pub struct Mmu {
     interrupt_flag: u8,
 
     // for unused addresses
-    total_memory: [u8; TOTAL_SIZE]
+    total_memory: [u8; TOTAL_SIZE],
+    old_tma: u8,
 }
 
 impl Mmu {
@@ -33,7 +35,8 @@ impl Mmu {
             interrupt_enable: 0,
             interrupt_flag: 0,
 
-            total_memory: [0; TOTAL_SIZE]
+            total_memory: [0; TOTAL_SIZE],
+            old_tma: 0,
         }
     }
 
@@ -94,7 +97,7 @@ impl Mmu {
             0xFF00 => self.sdl2_wrapper.joypad.write_joypad(byte),
             0xFF04 => self.timer.write_div(byte),
             0xFF05 => self.timer.write_tima(byte),
-            0xFF06 => self.timer.write_tma(byte),
+            0xFF06 => { self.old_tma = self.timer.read_tima(); self.timer.write_tma(byte)},
             0xFF07 => self.timer.write_tac(byte),
             0xFF0F => self.interrupt_flag = byte,
             
@@ -134,6 +137,29 @@ impl Mmu {
         for i in 0x00..=0x9F {
             let byte = self.read_byte(start | i);
             self.write_byte(0xFE00 | i, byte);
+        }
+    }
+
+    pub fn step_timer(&mut self, cycles: u8) {
+        // old TMA is used by timer in case TMA is written on the same cycle where TIMA is set to TMA
+        let cur_tma = self.timer.read_tma();
+        self.timer.write_tma(self.old_tma);
+
+        if self.timer.step(cycles) {
+            self.request_interrupt(Interrupt::Timer)
+        }
+
+        self.timer.write_tma(cur_tma)
+    }
+
+    /// Sets given interrupt's bit in IF, effectively requesting for the interrupt.
+    pub fn request_interrupt(&mut self, interrupt: Interrupt) {
+        match interrupt {
+            Interrupt::VBlank => self.interrupt_flag |= 1 << 0,
+            Interrupt::Stat   => self.interrupt_flag |= 1 << 1,
+            Interrupt::Timer  => self.interrupt_flag |= 1 << 2,
+            Interrupt::Serial => self.interrupt_flag |= 1 << 3,
+            Interrupt::Joypad => self.interrupt_flag |= 1 << 4,
         }
     }
 

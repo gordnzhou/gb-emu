@@ -20,7 +20,7 @@ pub struct Cpu {
     pub(self) sp: Register,
 }
 
-enum Interrupt {
+pub enum Interrupt {
     VBlank,
     Stat,
     Timer,
@@ -49,7 +49,8 @@ impl Cpu {
     /// that the next CPU instruction will take; returns the period length in M-cycles
     pub fn step(&mut self) -> u8 {
         let cycles = self.cycle();
-        self.memory.sdl2_wrapper.step();
+        self.memory.step_timer(cycles);
+        self.memory.sdl2_wrapper.step(cycles);
         cycles
     }
 

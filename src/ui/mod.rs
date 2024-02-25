@@ -64,7 +64,7 @@ impl Sdl2Wrapper {
         Ok(window)
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, cycles: u8) {
         self.apu.step();
 
         self.joypad.step();
