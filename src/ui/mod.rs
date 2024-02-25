@@ -12,6 +12,8 @@ use joypad::Joypad;
 use apu::Apu;
 use ppu::Ppu;
 
+use crate::cpu::Interrupt;
+
 const LCD_WIDTH: usize= 160;
 const LCD_HEIGHT: usize = 144;
 
@@ -64,12 +66,22 @@ impl Sdl2Wrapper {
         Ok(window)
     }
 
-    pub fn step(&mut self, cycles: u8) {
-        self.apu.step();
+    // TODO: Steps PPU, Display, Audio and Joypad Input over the given period (in cycles).
+    pub fn step(&mut self, cycles: u8) -> Vec<Interrupt> {
+        let mut interrupts = self.ppu.step(cycles);
 
-        self.joypad.step();
+        if self.ppu.entered_vblank {
+            self.draw_window();
+        }
+        
+        if self.joypad.step() {
+            interrupts.push(Interrupt::Joypad);
+        }
 
-        self.ppu.step();
+        self.apu.step(cycles);
+
+        // interrupts
+        Vec::new()
     }
 
     /// Renders frame buffer to SDL2 canvas (60 times per second).

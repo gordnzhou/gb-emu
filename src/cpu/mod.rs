@@ -49,8 +49,9 @@ impl Cpu {
     /// that the next CPU instruction will take; returns the period length in M-cycles
     pub fn step(&mut self) -> u8 {
         let cycles = self.cycle();
-        self.memory.step_timer(cycles);
-        self.memory.sdl2_wrapper.step(cycles);
+
+        self.memory.step(cycles);
+        
         cycles
     }
 

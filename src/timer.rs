@@ -19,24 +19,33 @@ impl Timer {
             tma: 0,
             tac: 0,
 
+            // number of M-cycles passed after div/tima was incremented
             div_cycles: 0,
             tima_cycles: 0,
         }
     }
 
-    /// Ticks timer registers over cycles period; return true if TIMA overflowed
+    /// Ticks timer registers over the given period (in cycles); returns true if TIMA overflowed
     pub fn step(&mut self, cycles: u8) -> bool {
         let cycles = cycles as u32;
 
+        self.step_div(cycles);
+
+        if self.tac & 0x04 != 0 {
+            self.step_tima(cycles)
+        } else {
+            false
+        }
+    }
+
+    fn step_div(&mut self, cycles: u32) {
         if self.div_cycles + cycles >= CYCLES_PER_DIV_INC {
             self.div = self.div.wrapping_add(1);
         }
         self.div_cycles = (self.div_cycles + cycles) % CYCLES_PER_DIV_INC;
+    }
 
-        if self.tac & 0x04 == 0 {
-            return false;
-        }
-
+    fn step_tima(&mut self, cycles: u32) -> bool {
         let cycles_per_tima_inc: u32 = match self.tac & 0x03 {
             0 => 256,
             1 => 4,
@@ -46,7 +55,7 @@ impl Timer {
         };
 
         let mut tima_overflow = false;
-        
+
         if self.tima_cycles + cycles >= cycles_per_tima_inc {
             self.div = self.div.wrapping_add(1);
             
@@ -58,7 +67,6 @@ impl Timer {
         self.tima_cycles = (self.tima_cycles + cycles) % cycles_per_tima_inc;
 
         tima_overflow
-
     }
 
     pub fn read_div(&self) -> u8 {

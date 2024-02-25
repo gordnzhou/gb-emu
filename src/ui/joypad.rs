@@ -21,7 +21,9 @@ impl Joypad {
         self.joypad = (byte & 0xF0) | joypad;
     }
 
-    pub fn step(&mut self) {
-
+    /// Update joypad registers to match SDL2 input
+    //  and returns true if a joypad interrupt is requested
+    pub fn step(&mut self) -> bool {
+        false 
     }
 }

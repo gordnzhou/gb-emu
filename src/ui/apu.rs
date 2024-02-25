@@ -7,7 +7,8 @@ impl Apu {
         Apu { }
     }
 
-    pub fn step(&mut self) {
+    #[allow(dead_code)]
+    pub fn step(&mut self, _cycles: u8) {
         
     }
 }

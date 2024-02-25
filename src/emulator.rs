@@ -1,7 +1,7 @@
 use crate::cpu::Cpu;
 
 // 1 dot = 2^22 Hz = 1/4 M-cycle = 238.4 ns
-pub const DOT_DURATION_NS: f32 = 1e9 * (1 << 22) as f32;
+pub const DOT_DURATION_NS: f32 = 1e9 / (1 << 22) as f32;
 
 use std::time::{Duration, Instant};
 
@@ -34,12 +34,12 @@ impl Emulator {
 
     /// Runs the emulator for the specified number of nanoseconds.
     pub fn debug_run(&mut self, total_dur_ns: u64) {
-        let mut total_dur_ns = total_dur_ns;
+        let mut dur_ns = 0;
 
         let mut last_instr = Instant::now();
         let mut cpu_duration_ns: u64 = 0;
 
-        loop {
+        while dur_ns < total_dur_ns {
             if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
                 last_instr = Instant::now();
 
@@ -47,10 +47,7 @@ impl Emulator {
 
                 cpu_duration_ns = (4.0 * cycles as f32 * DOT_DURATION_NS) as u64;
 
-                if cpu_duration_ns > total_dur_ns {
-                    break;
-                } 
-                total_dur_ns -= cpu_duration_ns;
+                dur_ns += cpu_duration_ns;
             }
         } 
     }

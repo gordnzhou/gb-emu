@@ -140,7 +140,19 @@ impl Mmu {
         }
     }
 
-    pub fn step_timer(&mut self, cycles: u8) {
+    /// Steps through components, updating interrupt flag.
+    // TODO: refactor interrupt representation to be updated as struct fields for each respective component
+    pub fn step(&mut self, cycles: u8) {
+        let interrupts = self.sdl2_wrapper.step(cycles);
+
+        self.step_timer(cycles);
+
+        for interrupt in interrupts {
+            self.request_interrupt(interrupt)
+        }
+    }
+
+    fn step_timer(&mut self, cycles: u8) {
         // old TMA is used by timer in case TMA is written on the same cycle where TIMA is set to TMA
         let cur_tma = self.timer.read_tma();
         self.timer.write_tma(self.old_tma);
