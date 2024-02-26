@@ -7,6 +7,9 @@ use sdl2::video::Window;
 use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::rect::Rect;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::EventPump;
 
 use joypad::Joypad;
 use apu::Apu;
@@ -29,6 +32,7 @@ pub struct Sdl2Wrapper {
     pub apu: Apu,
     pub ppu: Ppu,
 
+    event_pump: EventPump,
     screen_scale: i32,
     canvas: Canvas<Window>,
 }
@@ -38,7 +42,7 @@ impl Sdl2Wrapper {
         let sdl_context: Sdl = sdl2::init()?;
         let video_subsystem = sdl_context.video()?;
         // let audio_subsystem = sdl_context.audio()?;
-        // let event_pump = sdl_context.event_pump()?;
+        let event_pump = sdl_context.event_pump()?;
         let window = Sdl2Wrapper::build_window(video_subsystem, screen_scale as u32)?;
         let canvas: Canvas<Window> = window.into_canvas().build().map_err(|e| e.to_string())?;
         
@@ -46,6 +50,7 @@ impl Sdl2Wrapper {
             joypad: Joypad::new(),
             apu: Apu::new(),
             ppu: Ppu::new(),
+            event_pump,
             canvas,
             screen_scale,
         })
@@ -56,7 +61,7 @@ impl Sdl2Wrapper {
         let window_height = LCD_HEIGHT as u32 * scale;
 
         let window = video_subsystem
-            .window("CHIP-8 Emulator", window_width, window_height)
+            .window("Gameboy Emulator", window_width, window_height)
             .position_centered()
             .opengl()
             .build()
@@ -66,22 +71,40 @@ impl Sdl2Wrapper {
         Ok(window)
     }
 
-    // TODO: Steps PPU, Display, Audio and Joypad Input over the given period (in cycles).
+    fn get_events(&mut self) {
+        for event in self.event_pump.poll_iter() {
+            match event {
+                Event::Quit {..} |
+                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                    panic!("Escape Entered");
+                },
+                _ => {}
+            }
+        }
+    }
+
+    /// Steps PPU, Display, Audio and Joypad Input over the given period (in cycles),
+    /// returning any interrupts requested.
     pub fn step(&mut self, cycles: u8) -> Vec<Interrupt> {
-        let mut interrupts = self.ppu.step(cycles);
+        let mut interrupts = Vec::new();
+
+        self.ppu.step(cycles);
 
         if self.ppu.entered_vblank {
+            interrupts.push(Interrupt::VBlank);
             self.draw_window();
         }
-        
-        if self.joypad.step() {
-            interrupts.push(Interrupt::Joypad);
+        if self.ppu.stat_triggered {
+            interrupts.push(Interrupt::Stat)
         }
+
+        self.get_events();
+        
+        self.joypad.step();
 
         self.apu.step(cycles);
 
-        // interrupts
-        Vec::new()
+        interrupts
     }
 
     /// Renders frame buffer to SDL2 canvas (60 times per second).

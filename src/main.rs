@@ -16,7 +16,7 @@ use ui::Sdl2Wrapper;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/01-special.gb";
+const ROM_PATH: &str = "roms/bootrom";
 const SCREEN_SCALE: i32 = 3;
 
 // FOR TESTING
@@ -31,7 +31,6 @@ fn clear_log_file() -> std::io::Result<()> {
 }
 
 fn main() -> Result<(), String> {
-    println!("Hello, world!");
 
     let sdl2_wrapper = Sdl2Wrapper::new(SCREEN_SCALE)?;
 

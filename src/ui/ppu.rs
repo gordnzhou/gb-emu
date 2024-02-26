@@ -1,6 +1,4 @@
-use crate::cpu::Interrupt;
-
-use std::cmp::{min, max};
+use std::cmp::min;
 
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0x00A0;
@@ -34,15 +32,20 @@ pub struct Ppu {
     // displayed on canvas at 60 Hz 
     pub frame_buffer: [[u8; LCD_WIDTH]; LCD_HEIGHT],
     pub entered_vblank: bool,
+    pub stat_triggered: bool,
+    stat_line: bool,
     mode: u8,
     mode_elapsed_dots: u32,
 
     mode_3_dots: u32,
     cur_pixel_x: usize,
     win_in_frame: bool,
+    win_counter: u8,
 
     obj_buffer_index: usize,
     obj_buffer: Vec<usize>,
+
+    count: u64,
 }
 
 impl Ppu {
@@ -65,27 +68,32 @@ impl Ppu {
 
             frame_buffer: [[0; LCD_WIDTH]; LCD_HEIGHT],
             entered_vblank: false,
+            stat_triggered: false,
+            stat_line: false,
+
             mode: 2,
             mode_elapsed_dots: 0,
 
             mode_3_dots: 0,
             cur_pixel_x: 0,
             win_in_frame: false,
+            win_counter: 0,
 
             obj_buffer_index: 0,
             obj_buffer: Vec::new(),
+
+            count: 0,
         }
     }
 
-    /// TODO: Steps through the PPU and Display and returns all interrupts triggered.
-    pub fn step(&mut self, cycles: u8) -> Vec<Interrupt> {
+    /// Steps through the PPU over the given period (in cycles).
+    pub fn step(&mut self, cycles: u8) {
         self.entered_vblank = false;
+        self.stat_triggered = false;
 
-        if self.lcdc & 0x80 == 0 {
-            return Vec::new();
+        if self.lcd_ppu_disabled() {
+            return;
         }
-
-        let mut interrupts = Vec::new();
 
         let dots = cycles as u32 * 4;
         let next_dots = self.mode_elapsed_dots + dots;
@@ -102,26 +110,18 @@ impl Ppu {
             self.step_mode(dots);
             self.mode_elapsed_dots += dots;    
         } else {
+            // new mode will be reached immediately after / during current cycle(s)
             self.step_mode(mode_end - self.mode_elapsed_dots);
+            self.next_mode();
 
-            // TODO: edge case when mode 3 transitions to mode 2 but mode 2 gets extended 
-            if self.next_mode() {
-                interrupts.push(Interrupt::VBlank);
-            }
-
+            // runs if new mode is reached partway through current cycle(s)
             self.step_mode(next_dots - mode_end);
             self.mode_elapsed_dots = next_dots - mode_end;
         }
-
-        if self.update_stat() {
-            interrupts.push(Interrupt::Stat);
-        }
-
-        interrupts
     }
 
-    //. Transitions to next mode in PPU; returns true if next mode is 1 (VBlank).
-    fn next_mode(&mut self) -> bool {
+    // Updates PPU to next mode state
+    fn next_mode(&mut self) {
         self.mode = match self.mode {
             0 => {
                 self.cur_pixel_x = 0;
@@ -131,13 +131,16 @@ impl Ppu {
                 if self.ly + 1 == LCD_HEIGHT as u8 {
                     // HBlank -> VBlank
                     self.ly = 0;
+                    self.count += 1;
                     self.win_in_frame = false;
+                    self.win_counter = 0;
                     self.entered_vblank = true;
                     1
                 } else {
                     // HBlank -> OAM Search
                     self.ly += 1;
                     self.win_in_frame = self.wy == self.ly;
+                    self.win_counter += if self.win_enabled() && self.win_in_frame { 1 } else { 0 };
                     2
                 }
             },
@@ -147,7 +150,9 @@ impl Ppu {
             },
             2 => {
                 // OAM Search -> Drawing
-                self.mode_3_dots = self.calc_mode_end_3();
+                self.obj_buffer_index = 0;
+                self.obj_buffer.sort_by(|a, b| { self.oam[a + 1].cmp(&self.oam[b + 1])});
+                self.mode_3_dots = self.calc_mode_3_dots();
                 3
             },
             3 => {
@@ -156,26 +161,24 @@ impl Ppu {
             },
             _ => unreachable!()
         };
-
-        self.mode == 1
     }
 
-    /// ASSUME: mode_elapsed_dots + dots is not greater than duration of current mode.
-    /// Steps through period (in dots) in current mode.
+    /// ASSUME: self.mode_elapsed_dots + dots will NOT exceed duration of current mode.
+    /// Step through period (in dots) over the current mode (do nothing for mode 1 and 0).
     fn step_mode(&mut self, dots: u32) {
         if dots == 0 {
             return;
         }
 
         if self.mode == 2 {
-            // check an attribute from OAM every 2 dotsx
+            // check an attribute from OAM every 2 dots
             let mut fetches = (dots + 1) / 2;
 
-            while fetches > 0 && self.obj_buffer_index < OAM_SIZE && self.obj_buffer.len() == 10 {
+            while fetches > 0 && self.obj_buffer_index < OAM_SIZE && self.obj_buffer.len() < 10 {
                 let y = self.oam[self.obj_buffer_index];
                 
                 if self.ly + 16 >= y && self.ly + 16 < y + self.obj_size()  {
-                    self.obj_buffer.push(self.obj_buffer_index)
+                    self.obj_buffer.push(self.obj_buffer_index);
                 }
 
                 self.obj_buffer_index += 4;
@@ -187,28 +190,49 @@ impl Ppu {
 
             // TODO: implement BG and OAM FIFO 
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
-                
+                let bg_win_colour = if !self.obj_only() {
+                    if self.win_enabled() && self.win_in_frame {
+                        let tile_pixel_x = self.cur_pixel_x + self.wx as usize - 7;
+                        let tile_pixel_y = (self.win_counter + self.wy) as usize;
+                        let win_tile_id = self.get_win_tile_id(tile_pixel_x / 8, tile_pixel_y / 8);
+                        let win_tile_addr = self.get_bgwin_tile_data_addr(win_tile_id);
+                        
+                        let offset = 2 * (tile_pixel_y as usize % 8);
+                        let pixel_lo = if self.vram[win_tile_addr + offset] & (1 << (tile_pixel_x % 8)) != 0 { 1 } else { 0 };
+                        let pixel_hi = if self.vram[win_tile_addr + offset + 1] & (1 << (tile_pixel_x % 8)) != 0 { 1 } else { 0 };
+                        self.bg_palette(pixel_hi << 1 | pixel_lo)
+                    } else {
+                        let tile_pixel_x = (self.cur_pixel_x + self.scx as usize) % 0xFF;
+                        let tile_pixel_y = (self.ly as usize + self.scy as usize) % 0xFF;
+                        let bg_tile_id = self.get_bg_tile_id(tile_pixel_x / 8, tile_pixel_y / 8);
+                        let bg_tile_addr = self.get_bgwin_tile_data_addr(bg_tile_id);
+
+                        let offset = 2 * (tile_pixel_y as usize % 8);
+                        let pixel_lo = if self.vram[bg_tile_addr + offset] & (1 << (tile_pixel_x % 8)) != 0 { 1 } else { 0 };
+                        let pixel_hi = if self.vram[bg_tile_addr + offset + 1] & (1 << (tile_pixel_x % 8)) != 0 { 1 } else { 0 };
+                        self.bg_palette(pixel_hi << 1 | pixel_lo)
+                    }
+                } else { 0 };
+
+                let obj_colour = if self.obj_enabled() && self.obj_buffer.len() > 0 {
+                    println!("sprite");
+                    // TODO: draw objects on top of bg/windows always at OAM x, y. flipx, flipy from tile set 0x8000 
+                    //  priority, 
+                    0
+                } else { 0 };
+
+                let colour = if obj_colour != 0 { obj_colour } else { bg_win_colour };
+                self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
                 self.cur_pixel_x += 1;
                 pixels_left -= 1;
             }
         }     
-        //      if lcdc.0 is set clear bg and window
-        //      else
-        //          draw bg pixels from tilemap (in lcdc.3) using tile data (lcdc.4), at scx, scy with colour bgp
-        //          if enabled (lcdc.5), draw window pixels from tilemap (in lcdc.6) using tile data (lcdc.4) at wx, wy with colour bgp
-        // 
-        //     draw objects on top of bg/windows always at OAM x, y and other attributes from tile set 0x8000 
-        //          ignore obj pixels with id 00 (transparent)
-        //          extend mode 3 dot length based on OBJ penalty algorithm
-        //
-        //     mode 3 can be 172 - 289 dots
 
-        // ** up to TWO modes can be be run in one step**
+        self.update_stat();
     }
 
-    /// updates STAT register and returns true if stat interrupt was triggered
-    // TODO: implemen stat blocking (update interrupt line struct field instead of returning stat)
-    fn update_stat(&mut self) -> bool {
+    /// updates STAT register and updates stat line
+    fn update_stat(&mut self) {
         let stat = self.stat & 0xFC;
         self.stat = stat | self.mode;
         
@@ -218,13 +242,17 @@ impl Ppu {
             self.stat &= 0xFB;
         }
 
-        (self.lyc == self.ly && self.stat & 0x40 != 0) |
-        (self.mode == 0      && self.stat & 0x20 != 0) |
-        (self.mode == 1      && self.stat & 0x10 != 0) |
-        (self.mode == 2      && self.stat & 0x08 != 0)
+        let old_stat_line = self.stat_line;
+
+        self.stat_line = (self.lyc == self.ly && self.stat & 0x40 != 0) |
+                         (self.mode == 0      && self.stat & 0x20 != 0) |
+                         (self.mode == 1      && self.stat & 0x10 != 0) |
+                         (self.mode == 2      && self.stat & 0x08 != 0);
+
+        self.stat_triggered = !old_stat_line && self.stat_line
     }
 
-    fn calc_mode_end_3(&self) -> u32 {
+    fn calc_mode_3_dots(&self) -> u32 {
         let mut res = MODE_3_MIN_DOTS + (self.scx % 8) as u32;
 
         if self.win_enabled() && self.win_in_frame {
@@ -233,28 +261,29 @@ impl Ppu {
 
         for i in &self.obj_buffer {
             let x = self.oam[*i];
-            let offset = if self.win_enabled() && self.win_in_frame && self.wx + 7 <= self.wx{ 
+            let offset = if self.win_enabled() && self.win_in_frame && x + 7 <= self.wx { 
                 0xFF - self.wx 
             } else { 
                 self.scx 
             };
             
-            res +=  11 - min(5, (x + offset) % 8) as u32;
+            res += 11 - min(5, (x + offset) % 8) as u32;
         }
 
         res
     }
 
-    fn render_pixel(&mut self, x: usize, y: usize, colour: u8) {
-        self.frame_buffer[y][x] = colour;
+    fn bg_palette(&self, id: u8) -> u8 {
+        let id = id << 1;
+        (self.bgp & (0x03 << id)) >> id
     }
 
-    fn lcd_ppu_enabled(&self) -> bool {
-        self.lcdc & 0x80 != 0
+    fn lcd_ppu_disabled(&self) -> bool {
+        self.lcdc & 0x80 == 0
     }
 
     fn win_enabled(&self) -> bool {
-        self.lcdc & 0x20 != 0
+        self.lcdc & 0x20 != 0 && self.lcdc & 0x01 != 0
     }
 
     fn obj_enabled(&self) -> bool {
@@ -270,49 +299,53 @@ impl Ppu {
         if self.lcdc & 0x04 == 0 { 8 } else { 16 }
     }
 
-    fn win_tmap_start(&self) -> usize {
-        if self.lcdc & 0x08 == 0 { 0x1800 } else { 0x1C00 }
+    /// ASSUME: 0 <= tmap_x, tmap_y < 32
+    /// Returns tile id at (tmap_x, tmap_y) from window tilemap.
+    fn get_win_tile_id(&self, tmap_x: usize, tmap_y: usize) -> u8 {
+        let start: usize = if self.lcdc & 0x40 == 0 { 0x1800 } else { 0x1C00 };
+        self.vram[start + tmap_x + 32 * tmap_y]
     }
 
-    fn bg_tmap_start(&self) -> usize {
-        if self.lcdc & 0x40 == 0 { 0x1800 } else { 0x1C00 }
+    // ASSUME: 0 <= tmap_x, tmap_y < 32
+    /// Returns tile id at (tmap_x, tmap_y) from background tilemap.
+    fn get_bg_tile_id(&self, tmap_x: usize, tmap_y: usize) -> u8 {
+        let start: usize = if self.lcdc & 0x08 == 0 { 0x1800 } else { 0x1C00 };
+        self.vram[start + tmap_x + 32 * tmap_y]
     }
 
-    /// Returns address of given tile id in vram (for bg and window only).
-    fn get_bgwin_tile_data(&self, tile_id: u8) -> usize {
+    /// Returns start address of given tile id in vram (for bg and window only).
+    fn get_bgwin_tile_data_addr(&self, tile_id: u8) -> usize {
         if self.lcdc & 0x10 == 1 { 
-            0x1000 + 16 * tile_id as usize
+            0x0000 + 16 * tile_id as usize
         } else {
-            (0x1800 + (16 * (tile_id as i8) as i32)) as usize
+            (0x0800 + (16 * (tile_id as i8) as i32)) as usize
         }
     }
 
     pub fn read_vram(&self, addr: usize) -> u8 {
-        if self.mode != 3 || self.lcdc & 0x80 == 0 {
+        if self.mode != 3 || self.lcd_ppu_disabled() {
             self.vram[addr - 0x8000]
         } else {
             0xFF
         }
-
     }
 
     pub fn write_vram(&mut self, addr: usize, byte: u8) {
-        if self.mode != 3 || self.lcdc & 0x80 == 0 { 
+        if self.mode != 3 || self.lcd_ppu_disabled() { 
             self.vram[addr - 0x8000] = byte;
         }
     }
 
     pub fn read_oam(&self, addr: usize) -> u8 {
-        if self.mode != 3 && self.mode != 2 || self.lcdc & 0x80 == 0 {
+        if (self.mode != 3 && self.mode != 2) || self.lcd_ppu_disabled() {
             self.oam[addr - 0xFE00]
         } else { 
             0xFF
-        }
-        
+        } 
     }
 
     pub fn write_oam(&mut self, addr: usize, byte: u8) {
-        if self.mode != 3 && self.mode != 2 || self.lcdc & 0x80 == 0 {
+        if (self.mode != 3 && self.mode != 2) || self.lcd_ppu_disabled() {
             self.oam[addr - 0xFE00] = byte;
         }
     }
@@ -414,4 +447,27 @@ impl Ppu {
         self.wx = byte 
     }
     
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bfg_palette() {
+       let mut ppu = Ppu::new();
+        ppu.write_bgp(0b11001001);
+
+        assert_eq!(ppu.bg_palette(0), 0b01);
+        assert_eq!(ppu.bg_palette(1), 0b10);
+        assert_eq!(ppu.bg_palette(2), 0b00);
+        assert_eq!(ppu.bg_palette(3), 0b11);
+
+        ppu.write_bgp(0b01110010);
+
+        assert_eq!(ppu.bg_palette(0), 0b10);
+        assert_eq!(ppu.bg_palette(1), 0b00);
+        assert_eq!(ppu.bg_palette(2), 0b11);
+        assert_eq!(ppu.bg_palette(3), 0b01);
+    }
 }
