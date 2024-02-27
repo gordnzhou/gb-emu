@@ -9,7 +9,7 @@ impl Cpu {
     /// Execute the next instruction, returning number of clock M-cycles taken.
     pub(super) fn execute_next_instruction(&mut self) -> u8 {
         let opcode = self.memory.read_byte(self.PC());
-        
+
         // FOR TESTING
         // let log_message = format!("A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}", 
         //     self.A(), self.AF() as u8, self.B(), self.C(), self.D(), self.E(), self.H(), self.L(),
@@ -298,9 +298,20 @@ impl Cpu {
         }
     }
 
-    /// does a JUMP to interrupt vector and returns number of clock M-cycles taken.
+    /// does a JUMP to interrupt vector and resets IF bit, returning M-cycles taken.
     pub(super) fn handle_interrupt(&mut self, interrupt: Interrupt) -> u8 {
         self.push_stack(self.PC());
+
+        let bit = match interrupt {
+            VBlank => 0,
+            Stat => 1, 
+            Timer => 2,
+            Serial => 3,
+            Joypad => 4,
+        };
+
+        let interrupt_flag = self.memory.read_byte(0xFF0F);
+        self.memory.write_byte(0xFF0F,  interrupt_flag & !(1 << bit));
 
         let jump_vector = match interrupt {
             VBlank => 0x40,

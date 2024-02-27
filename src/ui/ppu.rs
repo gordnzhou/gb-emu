@@ -218,10 +218,6 @@ impl Ppu {
 
                 let colour = if obj_colour != 0 { obj_colour } else { bg_win_colour };
 
-                // if colour != 3 && self.ly < 100 {
-                //     println!("{} {}", self.ly, self.cur_pixel_x);
-                // }
-
                 self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
                 self.cur_pixel_x += 1;
                 pixels_left -= 1;

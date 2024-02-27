@@ -57,11 +57,11 @@ impl Timer {
         let mut tima_overflow = false;
 
         if self.tima_cycles + cycles >= cycles_per_tima_inc {
-            self.div = self.div.wrapping_add(1);
+            self.tima = self.tima.wrapping_add(1);
             
-            if self.div == 0 {
+            if self.tima == 0 {
                 tima_overflow = true;
-                self.div = self.tma;
+                self.tima = self.tma;
             }
         }
         self.tima_cycles = (self.tima_cycles + cycles) % cycles_per_tima_inc;

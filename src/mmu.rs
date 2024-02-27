@@ -156,7 +156,7 @@ impl Mmu {
         // old TMA is used by timer in case TMA is written on the same cycle where TIMA is set to TMA
         let cur_tma = self.timer.read_tma();
         self.timer.write_tma(self.old_tma);
-
+        
         if self.timer.step(cycles) {
             self.request_interrupt(Interrupt::Timer)
         }

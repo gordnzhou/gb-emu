@@ -46,7 +46,7 @@ impl Cpu {
     }
 
     /// Steps through all parts of the emulator over the period
-    /// that the next CPU instruction will take; returns the period length in M-cycles
+    /// that the next CPU instruction will take; returns that period's length in M-cycles.
     pub fn step(&mut self) -> u8 {
         let cycles = self.cycle();
 
@@ -59,6 +59,7 @@ impl Cpu {
     fn cycle(&mut self) -> u8 {
         if self.scheduled_ei {
             self.ime = true;
+            self.scheduled_ei = false;
         }
         
         let mut cycles = if !self.halted {
@@ -84,14 +85,13 @@ impl Cpu {
         cycles
     }
     
-    /// Returns the next pending interrupt by priority; if one is found, resets its corresponding bit in IE.
+    /// Returns the next pending interrupt by priority
     fn get_pending_interrupt(&mut self) -> Option<Interrupt>{
         let interrupt_enable: u8 =  self.memory.read_byte(0xFFFF);
         let interrupt_flag: u8 = self.memory.read_byte(0xFF0F);
 
         for bit in 0..=4 {   
-            if (interrupt_enable & (1 << bit) != 0) && (interrupt_flag & (1 << bit) != 0) {
-                self.memory.write_byte(0xFFFF, interrupt_enable & !(1 << bit));
+            if interrupt_enable & (1 << bit) != 0 && interrupt_flag & (1 << bit) != 0 {
 
                 let interrupt: Interrupt = match bit {
                     0 => VBlank,
