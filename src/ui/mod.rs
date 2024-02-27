@@ -21,10 +21,10 @@ const LCD_WIDTH: usize= 160;
 const LCD_HEIGHT: usize = 144;
 
 const COLOURS: [Color; 4] = [
-    Color::RGB(155, 188, 15), // 00 -> White
-    Color::RGB(139, 172, 15), // 01 -> Light Gray
-    Color::RGB(48, 98, 48),   // 10 -> Dark Gray
-    Color::RGB(15, 56, 15),   // 11 -> Black
+    Color::RGB(15, 56, 15),   // 00 -> Black
+    Color::RGB(48, 98, 48),   // 01 -> Dark Gray
+    Color::RGB(139, 172, 15), // 10 -> Light Gray
+    Color::RGB(155, 188, 15), // 11 -> White
 ];
 
 pub struct Sdl2Wrapper {

@@ -166,6 +166,7 @@ impl Mmu {
 
     /// Sets given interrupt's bit in IF, effectively requesting for the interrupt.
     pub fn request_interrupt(&mut self, interrupt: Interrupt) {
+        
         match interrupt {
             Interrupt::VBlank => self.interrupt_flag |= 1 << 0,
             Interrupt::Stat   => self.interrupt_flag |= 1 << 1,

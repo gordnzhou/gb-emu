@@ -16,7 +16,7 @@ use ui::Sdl2Wrapper;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/bootrom";
+const ROM_PATH: &str = "roms/02-interrupts.gb";
 const SCREEN_SCALE: i32 = 3;
 
 // FOR TESTING
@@ -31,6 +31,7 @@ fn clear_log_file() -> std::io::Result<()> {
 }
 
 fn main() -> Result<(), String> {
+    // clear_log_file();
 
     let sdl2_wrapper = Sdl2Wrapper::new(SCREEN_SCALE)?;
 
@@ -41,7 +42,7 @@ fn main() -> Result<(), String> {
 
     let mut emulator = Emulator::new(cpu);
 
-    emulator.debug_run(5e9 as u64);
+    emulator.debug_run(20e9 as u64);
 
     Ok(())
 }
