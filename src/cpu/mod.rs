@@ -29,9 +29,9 @@ pub enum Interrupt {
 }
 
 impl Cpu {
-    pub fn new(memory: Mmu) -> Self {
+    pub fn new() -> Self {
         Cpu { 
-            memory,
+            memory: Mmu::new(),
             scheduled_ei: false,
             ime: false,
             halted: false,
@@ -107,5 +107,51 @@ impl Cpu {
         }   
         
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cpu::Cpu;
+    use crate::emulator::{LCD_WIDTH, LCD_HEIGHT};
+
+    const CPU_INSTRS_CHECKSUM: u32 = 4219773793;
+    const TEST_FILES: [&str; 11] = [
+        "01-special.gb",
+        "02-interrupts.gb",
+        "03-op sp,hl.gb",
+        "04-op r,imm.gb",
+        "05-op rp.gb",
+        "06-ld r,r.gb",
+        "07-jr,jp,call,ret,rst.gb",
+        "08-misc instrs.gb",
+        "09-op r,r.gb",
+        "10-bit ops.gb",
+        "11-op a,(hl).gb"
+    ];
+
+    #[test]
+    fn cpu_instr_test() {
+        for test in TEST_FILES {
+            let mut sum: u32 = 0;
+
+            let mut cpu = Cpu::new();
+            cpu.memory.load_rom(&*format!("roms/{}", test));
+
+            let mut cycles: u64 = 0;
+            while cycles < 6380293 {
+                cycles += cpu.step() as u64;
+            } 
+
+            for y in 0..LCD_HEIGHT {
+                for x in 0..LCD_WIDTH {
+                    let val = cpu.memory.ppu.frame_buffer[y][x] as u32;
+                    let i = y * LCD_HEIGHT + x;
+                    sum = sum.wrapping_add(val).wrapping_mul(i as u32);
+                }
+            }
+
+            assert!(sum == CPU_INSTRS_CHECKSUM, "test rom failed: {}", test);
+        }
     }
 }

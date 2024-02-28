@@ -404,9 +404,6 @@ impl Ppu {
     }
 
     pub fn read_ly(&self) -> u8 {
-        // FOR TESTING
-        // return 0x90;
-        
         self.ly
     }
 
