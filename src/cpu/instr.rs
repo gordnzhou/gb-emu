@@ -2,6 +2,9 @@
 use super::{Cpu, Interrupt::*};
 use crate::cpu::Interrupt;
 
+use std::fs::OpenOptions;
+use std::io::prelude::*;
+
 impl Cpu {
     /// Execute the next instruction, returning number of clock M-cycles taken.
     pub(super) fn execute_next_instruction(&mut self) -> u8 {
@@ -1490,4 +1493,15 @@ impl Cpu {
     fn set_hflag(&mut self, val: bool)  { self.af.set_bit(5, val); }
     fn set_nflag(&mut self, val: bool) { self.af.set_bit(6, val); }
     fn set_zflag(&mut self, val: bool) { self.af.set_bit(7, val); }
+}
+
+// FOR TESTING
+#[allow(dead_code)]
+fn log_to_file(message: &str) -> std::io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("logs/log.txt")?;
+
+    writeln!(file, "{}", message)
 }

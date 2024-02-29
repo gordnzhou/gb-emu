@@ -10,10 +10,10 @@ use sdl2::EventPump;
 use crate::cpu::Cpu;
 
 pub const COLOURS: [Color; 4] = [
-    Color::RGB(15, 56, 15),   // 00 -> Black
-    Color::RGB(48, 98, 48),   // 01 -> Dark Gray
-    Color::RGB(139, 172, 15), // 10 -> Light Gray
-    Color::RGB(155, 188, 15), // 11 -> White
+    Color::RGB(155, 188, 15), // 00 -> White
+    Color::RGB(139, 172, 15), // 01 -> Light Gray
+    Color::RGB(48, 98, 48),   // 10 -> Dark Gray
+    Color::RGB(15, 56, 15),   // 11 -> Black
 ];
 
 pub const LCD_WIDTH: usize= 160;
@@ -76,7 +76,7 @@ impl Emulator {
 
                 cpu_duration_ns = 4.0 * cycles as f32 * DOT_DURATION_NS;
 
-                if self.cpu.memory.window_ready {
+                if self.cpu.memory.ppu.entered_vblank {
                     self.draw_window(self.cpu.memory.ppu.frame_buffer);
                 }
             }
@@ -100,7 +100,7 @@ impl Emulator {
                 cpu_duration_ns = (4.0 * cycles as f32 * DOT_DURATION_NS) as u64;
                 dur_ns += cpu_duration_ns;
 
-                if self.cpu.memory.window_ready {
+                if self.cpu.memory.ppu.entered_vblank {
                     self.draw_window(self.cpu.memory.ppu.frame_buffer);
                 }
             }

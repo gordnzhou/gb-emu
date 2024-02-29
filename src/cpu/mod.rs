@@ -36,12 +36,12 @@ impl Cpu {
             ime: false,
             halted: false,
             halt_bug: false,
-            af: Register(0x01B0),
-            bc: Register(0x0013),
-            de: Register(0x00D8),
-            hl: Register(0x014D),
-            pc: Register(0x0100),
-            sp: Register(0xFFFE),
+            af: Register(0x0000),
+            bc: Register(0x0000),
+            de: Register(0x0000),
+            hl: Register(0x0000),
+            pc: Register(0x0000), // switch to 0x100 to skip bootrom
+            sp: Register(0x0000),
         }
     }
 
@@ -112,10 +112,10 @@ impl Cpu {
 
 #[cfg(test)]
 mod tests {
+    use core::panic;
     use crate::cpu::Cpu;
-    use crate::emulator::{LCD_WIDTH, LCD_HEIGHT};
 
-    const CPU_INSTRS_CHECKSUM: u32 = 4219773793;
+    const TIMEOUT: u64 = 1 << 32;
     const TEST_FILES: [&str; 11] = [
         "01-special.gb",
         "02-interrupts.gb",
@@ -132,26 +132,21 @@ mod tests {
 
     #[test]
     fn cpu_instr_test() {
-        for test in TEST_FILES {
-            let mut sum: u32 = 0;
-
+        'outer: for test in TEST_FILES {
             let mut cpu = Cpu::new();
             cpu.memory.load_rom(&*format!("roms/{}", test));
 
             let mut cycles: u64 = 0;
-            while cycles < 6380293 {
+            while cycles < TIMEOUT {
                 cycles += cpu.step() as u64;
-            } 
 
-            for y in 0..LCD_HEIGHT {
-                for x in 0..LCD_WIDTH {
-                    let val = cpu.memory.ppu.frame_buffer[y][x] as u32;
-                    let i = y * LCD_HEIGHT + x;
-                    sum = sum.wrapping_add(val).wrapping_mul(i as u32);
+                if cpu.memory.serial_output.contains("Passed") {
+                    continue 'outer
+                } else if cpu.memory.serial_output.contains("Failed") {
+                    break;
                 }
-            }
-
-            assert!(sum == CPU_INSTRS_CHECKSUM, "test rom failed: {}", test);
+            } 
+            panic!("test rom failed: {}", test);
         }
     }
 }

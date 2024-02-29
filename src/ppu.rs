@@ -38,7 +38,6 @@ pub struct Ppu {
     // frame buffer representing the LCD screen that will be
     // displayed on canvas at 60 Hz 
     pub frame_buffer: [[u8; LCD_WIDTH]; LCD_HEIGHT],
-    pub entered_vblank: bool,
     pub stat_triggered: bool,
     stat_line: bool,
     mode: u8,
@@ -51,6 +50,9 @@ pub struct Ppu {
 
     obj_buffer_index: usize,
     obj_buffer: Vec<usize>,
+
+    pub entered_vblank: bool,
+    last_vblank_scanline: u32,
 }
 
 impl Ppu {
@@ -74,7 +76,6 @@ impl Ppu {
             wx: 0,
 
             frame_buffer: [[0; LCD_WIDTH]; LCD_HEIGHT],
-            entered_vblank: false,
             stat_triggered: false,
             stat_line: false,
 
@@ -88,6 +89,9 @@ impl Ppu {
 
             obj_buffer_index: 0,
             obj_buffer: Vec::new(),
+
+            entered_vblank: false,
+            last_vblank_scanline: 0,
         }
     }
 
@@ -132,17 +136,18 @@ impl Ppu {
                 self.cur_pixel_x = 0;
                 self.obj_buffer = Vec::new();
                 self.obj_buffer_index = 0;
+                self.ly += 1; 
 
-                if self.ly + 1 == LCD_HEIGHT as u8 {
+                if self.ly == LCD_HEIGHT as u8 {
                     // HBlank -> VBlank
-                    self.ly = 0;
                     self.win_in_frame = false;
                     self.win_counter = 0;
                     self.entered_vblank = true;
+                    self.last_vblank_scanline = 0;
+
                     1
                 } else {
                     // HBlank -> OAM Search
-                    self.ly += 1;
                     self.win_in_frame = self.wy == self.ly;
                     self.win_counter += if self.win_enabled() && self.win_in_frame { 1 } else { 0 };
                     2
@@ -150,6 +155,7 @@ impl Ppu {
             },
             1 => {
                 // VBlank -> OAM Search
+                self.ly = 0;
                 2 
             },
             2 => {
@@ -199,6 +205,7 @@ impl Ppu {
                         let tile_pixel_x = self.cur_pixel_x + self.wx as usize - 7;
                         let tile_pixel_y = (self.win_counter + self.wy) as usize;
                         let tile_data = self.fetch_tile(tile_pixel_x, tile_pixel_y, false);
+
                         self.bg_palette(tile_data)
                     } else {
                         let tile_pixel_x = (self.cur_pixel_x + self.scx as usize) % 0xFF;
@@ -222,7 +229,12 @@ impl Ppu {
                 self.cur_pixel_x += 1;
                 pixels_left -= 1;
             }
-        }     
+        }  else if self.mode == 1 {
+            if self.last_vblank_scanline + dots >= SCAN_LINE_DOTS {
+                self.ly += 1;
+            }
+            self.last_vblank_scanline = (self.last_vblank_scanline + dots) % SCAN_LINE_DOTS;
+        }
 
         self.update_stat();
     }
@@ -239,7 +251,7 @@ impl Ppu {
             self.tile_map1[tmap_addr] 
         };
 
-        let tile = self.tile_data[if self.lcdc & 0x10 == 1 { 
+        let tile = self.tile_data[if self.lcdc & 0x10 != 0 { 
             tile_id as usize 
         } else {
             (128 + (tile_id as i8) as i16) as usize

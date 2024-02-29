@@ -25,8 +25,8 @@ pub struct Mmu {
 
     // for unused addresses
     total_memory: [u8; TOTAL_SIZE],
+    pub serial_output: String,
     old_tma: u8,
-    pub window_ready: bool,
 }
 
 impl Mmu {
@@ -43,8 +43,8 @@ impl Mmu {
             interrupt_flag: 0,
 
             total_memory: [0; TOTAL_SIZE],
+            serial_output: String::new(),
             old_tma: 0,
-            window_ready: false,
         }
     }
 
@@ -103,12 +103,13 @@ impl Mmu {
             0xFE00..=0xFE9F => self.ppu.write_oam(addr, byte),
             0xFEA0..=0xFEFF => {},
             0xFF00 => self.joypad.write_joypad(byte),
+            0xFF01 => self.serial_output.push(char::from(byte)),
             0xFF04 => self.timer.write_div(byte),
             0xFF05 => self.timer.write_tima(byte),
             0xFF06 => { self.old_tma = self.timer.read_tima(); self.timer.write_tma(byte)},
             0xFF07 => self.timer.write_tac(byte),
             0xFF0F => self.interrupt_flag = byte,
-            
+            // ...
             0xFF40 => self.ppu.write_lcdc(byte),
             0xFF41 => self.ppu.write_stat(byte),
             0xFF42 => self.ppu.write_scy(byte),
@@ -151,13 +152,10 @@ impl Mmu {
     /// Steps through components, updating interrupt flag.
     // TODO: refactor interrupt representation to be updated as struct fields for each respective component
     pub fn step(&mut self, cycles: u8) {
-        self.window_ready = false;
-
         self.ppu.step(cycles);
 
         if self.ppu.entered_vblank {
             self.request_interrupt(Interrupt::VBlank);
-            self.window_ready = true;
         }
 
         if self.ppu.stat_triggered {
