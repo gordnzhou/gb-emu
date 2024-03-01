@@ -15,7 +15,8 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/gb_bios.bin";
+const ROM_PATH: &str = "roms/drmario.gb";
+
 const SCREEN_SCALE: i32 = 3;
 
 // FOR TESTING
@@ -32,8 +33,7 @@ fn clear_log_file() -> std::io::Result<()> {
 fn main() -> Result<(), String> {
     // clear_log_file().unwrap();
 
-    let mut emulator = Emulator::new(SCREEN_SCALE)?;
-    emulator.load_rom(ROM_PATH);
+    let mut emulator = Emulator::new(SCREEN_SCALE, ROM_PATH, false)?;
     emulator.debug_run(20e9 as u64);
 
     Ok(())

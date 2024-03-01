@@ -29,19 +29,19 @@ pub enum Interrupt {
 }
 
 impl Cpu {
-    pub fn new() -> Self {
+    pub fn new(af: u16, bc: u16, de: u16, hl: u16, pc: u16, sp: u16) -> Self {
         Cpu { 
             memory: Mmu::new(),
             scheduled_ei: false,
             ime: false,
             halted: false,
             halt_bug: false,
-            af: Register(0x0000),
-            bc: Register(0x0000),
-            de: Register(0x0000),
-            hl: Register(0x0000),
-            pc: Register(0x0000), // switch to 0x100 to skip bootrom
-            sp: Register(0x0000),
+            af: Register(af),
+            bc: Register(bc),
+            de: Register(de),
+            hl: Register(hl),
+            pc: Register(pc),
+            sp: Register(sp),
         }
     }
 
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn cpu_instr_test() {
         'outer: for test in TEST_FILES {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
             cpu.memory.load_rom(&*format!("roms/{}", test));
 
             let mut cycles: u64 = 0;
@@ -141,6 +141,7 @@ mod tests {
                 cycles += cpu.step() as u64;
 
                 if cpu.memory.serial_output.contains("Passed") {
+                    println!("Passed cpu_test {}", test);
                     continue 'outer
                 } else if cpu.memory.serial_output.contains("Failed") {
                     break;

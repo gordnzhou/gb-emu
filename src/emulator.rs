@@ -9,6 +9,21 @@ use sdl2::EventPump;
 
 use crate::cpu::Cpu;
 
+const BOOTROM_PATH: &str = "roms/bootrom";
+
+
+// in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
+pub const KEYMAPPINGS: [Keycode; 8] = [
+    Keycode::I,
+    Keycode::J,
+    Keycode::K,
+    Keycode::L,
+    Keycode::S,
+    Keycode::W,
+    Keycode::A,
+    Keycode::D,
+];
+
 pub const COLOURS: [Color; 4] = [
     Color::RGB(155, 188, 15), // 00 -> White
     Color::RGB(139, 172, 15), // 01 -> Light Gray
@@ -28,11 +43,12 @@ pub struct Emulator {
     event_pump: EventPump,
     screen_scale: i32,
     canvas: Canvas<Window>,
-    cpu: Cpu
+    key_status: [bool; 8],
+    cpu: Cpu,
 }
 
 impl Emulator {
-    pub fn new(screen_scale: i32) -> Result<Self, String> {
+    pub fn new(screen_scale: i32, rom_path: &str, with_bootrom: bool) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
         let video_subsystem = sdl_context.video()?;
         // let audio_subsystem = sdl_context.audio()?;
@@ -40,11 +56,24 @@ impl Emulator {
         let window = Emulator::build_window(video_subsystem, screen_scale as u32)?;
         let canvas: Canvas<Window> = window.into_canvas().build().map_err(|e| e.to_string())?;
 
+        let cpu = if with_bootrom {
+            // TODO: implement unmapping of bootrom once it finishes running
+            let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0);
+            cpu.memory.load_rom(rom_path);
+            cpu.memory.load_rom(BOOTROM_PATH);
+            cpu
+        } else {
+            let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
+            cpu.memory.load_rom(rom_path);
+            cpu
+        };
+
         Ok(Emulator {
             event_pump,
             canvas,
             screen_scale,
-            cpu: Cpu::new(),
+            key_status: [true; 8],
+            cpu,
         })
     }
 
@@ -91,7 +120,10 @@ impl Emulator {
         let mut cpu_duration_ns: u64 = 0;
 
         while dur_ns < total_dur_ns {
-            self.get_events();
+            match self.get_events() {
+                Ok(_) => self.cpu.memory.joypad.step(self.key_status),
+                Err(e) => panic!("{}", e)
+            }
 
             if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
                 last_instr = Instant::now();
@@ -107,20 +139,32 @@ impl Emulator {
         } 
     }
 
-    pub fn load_rom(&mut self, rom_path: &str) {
-        self.cpu.memory.load_rom(rom_path)
-    }
-
-    fn get_events(&mut self) {
+    fn get_events(&mut self) -> Result<(), &str> {
         for event in self.event_pump.poll_iter() {
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    panic!("Escape Entered");
+                    return Err("User Exited");
                 },
+                Event::KeyDown { keycode: Some(key), ..} => {        
+                    for i in 0..8 {
+                        if KEYMAPPINGS[i] == key {
+                            self.key_status[i] = false;
+                        }
+                    }
+                }
+                Event::KeyUp { keycode: Some(key), .. } => {
+                    for i in 0..8 {
+                        if KEYMAPPINGS[i] == key {
+                            self.key_status[i] = true;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
+
+        Ok(())
     }
 
     /// Renders frame buffer to SDL2 canvas (60 times per second).

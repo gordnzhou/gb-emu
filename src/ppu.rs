@@ -201,27 +201,59 @@ impl Ppu {
             // TODO: implement BG and OAM FIFO 
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
                 let bg_win_colour = if !self.obj_only() {
-                    if self.win_enabled() && self.win_in_frame {
+
+                    let tile_data =  if self.win_enabled() && self.win_in_frame {
                         let tile_pixel_x = self.cur_pixel_x + self.wx as usize - 7;
                         let tile_pixel_y = (self.win_counter + self.wy) as usize;
-                        let tile_data = self.fetch_tile(tile_pixel_x, tile_pixel_y, false);
-
-                        self.bg_palette(tile_data)
+                        self.fetch_tile(tile_pixel_x, tile_pixel_y, false)
                     } else {
                         let tile_pixel_x = (self.cur_pixel_x + self.scx as usize) % 0xFF;
                         let tile_pixel_y = (self.ly as usize + self.scy as usize) % 0xFF;
-                        let tile_data = self.fetch_tile(tile_pixel_x, tile_pixel_y, true);
+                        self.fetch_tile(tile_pixel_x, tile_pixel_y, true)
+                    };
 
-                        self.bg_palette(tile_data)
+                    Ppu::apply_palette(&tile_data, &self.bgp)
+                } else { 0 };
+
+                let mut obj_colour = 0;
+                /* 
+                if self.obj_enabled() && self.obj_buffer.len() > 0 {
+                    for index in &self.obj_buffer {
+                        let obj_x = self.oam[*index][1] as usize; // = x position on screen = obj_x - 8
+                        let obj_y = self.oam[*index][0] as usize; // = y position on screen = obj_y - 16
+
+                        if obj_x <= self.cur_pixel_x + 8 && self.cur_pixel_x < obj_x {
+                            let attributes = self.oam[*index][3];
+                            let tile_id = self.oam[*index][2] as usize;
+
+                            let tile = self.tile_data[if self.obj_size() == 16 { 
+                                if self.ly as usize + 24 >= obj_y {
+                                    tile_id & 0xFE
+                                } else {
+                                    tile_id | 0x01
+                                }
+                            } else {
+                                tile_id
+                            }];
+
+                            let offset_y_lo = if attributes & 0x40 != 0 { (7 - (obj_y as usize & 7)) << 1 } else { (obj_y as usize & 7) << 1 };
+                            let offset_y_hi = if attributes & 0x40 != 0 { offset_y_lo.wrapping_sub(1) } else { offset_y_lo.wrapping_add(1) };
+                            let offset_x = if attributes & 0x20 != 0 { 1 << (obj_x & 7)} else { 0x80 >> (obj_x & 7) };
+
+                            let pixel_lo = (tile[offset_y_lo] & offset_x != 0) as u8;
+                            let pixel_hi = (tile[offset_y_hi] & offset_x != 0) as u8;
+
+                            let id = (pixel_hi << 1) | pixel_lo;
+
+                            if attributes & 0x80 != 0 { 
+                                let palette = if attributes & 0x10 == 0 { self.obp0 } else { self.obp1 };
+                                obj_colour = Ppu::apply_palette(&id, &palette) 
+                            }
+                            break;
+                        } 
                     }
-
-                } else { 0 };
-
-                let obj_colour = if self.obj_enabled() && self.obj_buffer.len() > 0 {
-                    // TODO: draw objects on top of bg/windows always at OAM x, y. flipx, flipy from tile set 0x8000 
-                    //  priority, 
-                    0
-                } else { 0 };
+                };
+                */
 
                 let colour = if obj_colour != 0 { obj_colour } else { bg_win_colour };
 
@@ -242,7 +274,7 @@ impl Ppu {
     /// Returns colour id located at (x, y) in bg/window tile map.
     /// 0 <= x, y <= 255
     fn fetch_tile(&self, x: usize, y: usize, is_bg: bool) -> u8 {
-        let tmap_addr = (x / 8) + 32 * (y / 8);
+        let tmap_addr = (x >> 3) + ((y >> 3) << 5);
 
         let lcd_bit = if is_bg { 0x08 } else { 0x40 };
         let tile_id = if self.lcdc & lcd_bit == 0 { 
@@ -254,10 +286,10 @@ impl Ppu {
         let tile = self.tile_data[if self.lcdc & 0x10 != 0 { 
             tile_id as usize 
         } else {
-            (128 + (tile_id as i8) as i16) as usize
+            (256 + (tile_id as i8) as i16) as usize
         }];
 
-        let offset = 2 * (y as usize % 8);
+        let offset = (y as usize & 7) << 1;
         let pixel_lo = if tile[offset] & (0x80 >> (x % 8)) != 0 { 1 } else { 0 };
         let pixel_hi = if tile[offset + 1] & (0x80 >> (x % 8)) != 0 { 1 } else { 0 };
 
@@ -306,9 +338,9 @@ impl Ppu {
         res
     }
 
-    fn bg_palette(&self, id: u8) -> u8 {
-        let id = id << 1;
-        (self.bgp & (0x03 << id)) >> id
+    fn apply_palette(colour_id: &u8, palette: &u8) -> u8 {
+        let id = colour_id << 1;
+        (palette & (0x03 << id)) >> id
     }
 
     fn lcd_ppu_disabled(&self) -> bool {
@@ -475,27 +507,4 @@ impl Ppu {
         self.wx = byte 
     }
     
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bfg_palette() {
-       let mut ppu = Ppu::new();
-        ppu.write_bgp(0b11001001);
-
-        assert_eq!(ppu.bg_palette(0), 0b01);
-        assert_eq!(ppu.bg_palette(1), 0b10);
-        assert_eq!(ppu.bg_palette(2), 0b00);
-        assert_eq!(ppu.bg_palette(3), 0b11);
-
-        ppu.write_bgp(0b01110010);
-
-        assert_eq!(ppu.bg_palette(0), 0b10);
-        assert_eq!(ppu.bg_palette(1), 0b00);
-        assert_eq!(ppu.bg_palette(2), 0b11);
-        assert_eq!(ppu.bg_palette(3), 0b01);
-    }
 }

@@ -23,10 +23,11 @@ pub struct Mmu {
     interrupt_enable: u8,
     interrupt_flag: u8,
 
+    pub serial_output: String,
+    old_tma: u8, 
+
     // for unused addresses
     total_memory: [u8; TOTAL_SIZE],
-    pub serial_output: String,
-    old_tma: u8,
 }
 
 impl Mmu {
@@ -51,21 +52,21 @@ impl Mmu {
     pub fn read_byte(&self, addr: u16) -> u8 {
         let addr = addr as usize;
 
-        match addr {
+        let byte = match addr {
             0x0000..=0x7FFF => self.rom.read_rom(addr),
             0x8000..=0x9FFF => self.ppu.read_vram(addr),
             0xA000..=0xBFFF => self.rom.read_eram(addr),
             0xC000..=0xDFFF => self.wram[addr - 0xC000],
             0xE000..=0xFDFF => self.wram[addr - 0xE000],
             0xFE00..=0xFE9F => self.ppu.read_oam(addr),
-            0xFEA0..=0xFEFF => 0xFF, // TODO: return 0x00 during OAM block trigger for dmg
+            0xFEA0..=0xFEFF => 0xFF,
             0xFF00 => self.joypad.read_joypad(),
             0xFF04 => self.timer.read_div(),
             0xFF05 => self.timer.read_tima(),
             0xFF06 => self.timer.read_tma(),
             0xFF07 => self.timer.read_tac(),
             0xFF0F => self.interrupt_flag,
-
+            // TODO: sound registers
             0xFF40 => self.ppu.read_lcdc(),
             0xFF41 => self.ppu.read_stat(),
             0xFF42 => self.ppu.read_scy(),
@@ -82,7 +83,9 @@ impl Mmu {
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80],
             0xFFFF => self.interrupt_enable,
             _ => self.total_memory[addr]
-        }
+        };
+
+        byte
     }
 
     pub fn read_word(&self, addr: u16) -> u16{
@@ -109,7 +112,7 @@ impl Mmu {
             0xFF06 => { self.old_tma = self.timer.read_tima(); self.timer.write_tma(byte)},
             0xFF07 => self.timer.write_tac(byte),
             0xFF0F => self.interrupt_flag = byte,
-            // ...
+            // TODO: sound registers
             0xFF40 => self.ppu.write_lcdc(byte),
             0xFF41 => self.ppu.write_stat(byte),
             0xFF42 => self.ppu.write_scy(byte),
@@ -118,7 +121,7 @@ impl Mmu {
             0xFF45 => self.ppu.write_lyc(byte),
             0xFF46 => { 
                 self.ppu.write_dma(byte); 
-                // self.transfer_to_oam(byte as u16 >> 8);
+                self.transfer_to_oam(byte as u16 >> 8);
             },
             0xFF47 => self.ppu.write_bgp(byte),
             0xFF48 => self.ppu.write_obp0(byte),
@@ -137,15 +140,12 @@ impl Mmu {
         self.write_byte(addr.wrapping_add(1), (word >> 8) as u8);
     }
 
-    /// TODO: Starts a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
-    /// after for 160 M-cycles (640 dots). Disables read/writes to 
-    /// all of memory, except for HRAM.
-    #[allow(dead_code)]
+    /// Starts a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
+    /// for 160 M-cycles (640 dots).
     pub fn transfer_to_oam(&mut self, start: u16) {
-        // self.dma_locked = 160;
         for i in 0x00..=0x9F {
             let byte = self.read_byte(start | i);
-            self.write_byte(0xFE00 | i, byte);
+            self.ppu.write_oam(0xFE00 | i as usize, byte);
         }
     }
 
@@ -162,7 +162,6 @@ impl Mmu {
             self.request_interrupt(Interrupt::Stat)
         }
     
-        self.joypad.step();
         self.apu.step(cycles);
         self.step_timer(cycles);
     }
@@ -198,8 +197,7 @@ impl Mmu {
                     self.write_byte(i as u16, rom_data[i]);
                 }
 
-                println!("Sucessfully read ROM starting at memory address {:#06x}", 0);
-                println!("ROM size: {} bytes", rom_data.len());
+                println!("Sucessfully read ROM of size {} bytes.", rom_data.len());
                 println!("First bytes: {:?}", &rom_data[..16]);
             }
             Err(err) => {
