@@ -9,6 +9,6 @@ impl Apu {
 
     #[allow(dead_code)]
     pub fn step(&mut self, _cycles: u8) {
-        
+        // TODO: ...
     }
 }

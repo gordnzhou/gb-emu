@@ -92,7 +92,6 @@ impl Cpu {
 
         for bit in 0..=4 {   
             if interrupt_enable & (1 << bit) != 0 && interrupt_flag & (1 << bit) != 0 {
-
                 let interrupt: Interrupt = match bit {
                     0 => VBlank,
                     1 => Stat,

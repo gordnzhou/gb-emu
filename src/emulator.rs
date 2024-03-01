@@ -43,7 +43,7 @@ pub struct Emulator {
     event_pump: EventPump,
     screen_scale: i32,
     canvas: Canvas<Window>,
-    key_status: [bool; 8],
+    key_status: u8,
     cpu: Cpu,
 }
 
@@ -72,7 +72,7 @@ impl Emulator {
             event_pump,
             canvas,
             screen_scale,
-            key_status: [true; 8],
+            key_status: 0xFF,
             cpu,
         })
     }
@@ -120,11 +120,6 @@ impl Emulator {
         let mut cpu_duration_ns: u64 = 0;
 
         while dur_ns < total_dur_ns {
-            match self.get_events() {
-                Ok(_) => self.cpu.memory.joypad.step(self.key_status),
-                Err(e) => panic!("{}", e)
-            }
-
             if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
                 last_instr = Instant::now();
 
@@ -135,6 +130,11 @@ impl Emulator {
                 if self.cpu.memory.ppu.entered_vblank {
                     self.draw_window(self.cpu.memory.ppu.frame_buffer);
                 }
+            }
+
+            match self.get_events() {
+                Ok(_) => self.cpu.memory.joypad.step(self.key_status),
+                Err(e) => panic!("{}", e)
             }
         } 
     }
@@ -149,14 +149,14 @@ impl Emulator {
                 Event::KeyDown { keycode: Some(key), ..} => {        
                     for i in 0..8 {
                         if KEYMAPPINGS[i] == key {
-                            self.key_status[i] = false;
+                            self.key_status &= !(1 << (7 - i));
                         }
                     }
                 }
                 Event::KeyUp { keycode: Some(key), .. } => {
                     for i in 0..8 {
                         if KEYMAPPINGS[i] == key {
-                            self.key_status[i] = true;
+                            self.key_status |= 1 << (7 - i);
                         }
                     }
                 }

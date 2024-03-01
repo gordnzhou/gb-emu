@@ -121,7 +121,7 @@ impl Mmu {
             0xFF45 => self.ppu.write_lyc(byte),
             0xFF46 => { 
                 self.ppu.write_dma(byte); 
-                self.transfer_to_oam(byte as u16 >> 8);
+                self.transfer_to_oam((byte as u16) << 8);
             },
             0xFF47 => self.ppu.write_bgp(byte),
             0xFF48 => self.ppu.write_obp0(byte),
@@ -153,17 +153,19 @@ impl Mmu {
     // TODO: refactor interrupt representation to be updated as struct fields for each respective component
     pub fn step(&mut self, cycles: u8) {
         self.ppu.step(cycles);
+    
+        self.apu.step(cycles);
+        self.step_timer(cycles);
 
         if self.ppu.entered_vblank {
             self.request_interrupt(Interrupt::VBlank);
         }
-
         if self.ppu.stat_triggered {
             self.request_interrupt(Interrupt::Stat)
         }
-    
-        self.apu.step(cycles);
-        self.step_timer(cycles);
+        if self.joypad.interrupt {
+            self.request_interrupt(Interrupt::Joypad)
+        }
     }
 
     fn step_timer(&mut self, cycles: u8) {

@@ -2,13 +2,13 @@
 
 pub struct Joypad {
     joypad: u8,
-    interrupt: bool,
+    pub interrupt: bool,
 }
 
 impl Joypad {
     pub fn new() -> Self {
         Joypad {
-            joypad: 0,
+            joypad: 0xFF,
             interrupt: false,
         }
     }
@@ -19,21 +19,15 @@ impl Joypad {
 
     /// Bottom four bits are read-only.
     pub fn write_joypad(&mut self, byte: u8) {
-        let joypad = self.joypad & 0x0F;
-        self.joypad = (byte & 0xF0) | joypad;
+        let joypad = self.joypad & 0xCF;
+        self.joypad = (byte & 0x30) | joypad;
     }
 
-    /// Update joypad register based on key_status, checking for any interrupts.
-    /// key_status is in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
+    /// Update joypad register based on status, checking for any interrupts.
+    /// status is in order of: START (msb), SELECT, B, A, DOWN, UP, LEFT, RIGHT (lsb).
     /// FALSE/0 = pressed and TRUE/1 = released.
-    pub fn step(&mut self, key_status: [bool; 8]) {
+    pub fn step(&mut self, status: u8) {   
         self.interrupt = false; 
-
-        let mut status = 0;
-        for bit in key_status {
-            status <<= 1;
-            status |= bit as u8;
-        }
 
         let upper_nibble = self.joypad & 0xF0;
         let lower_nibble = if self.select_buttons() && self.select_dpad() {
@@ -48,6 +42,10 @@ impl Joypad {
             }
         };
 
+        if (self.joypad & 0x0F) & !lower_nibble != 0 {
+            self.interrupt = true;
+        }
+
         self.joypad = upper_nibble | lower_nibble
     }
 
@@ -58,12 +56,4 @@ impl Joypad {
     fn select_dpad(&self) -> bool {
         self.joypad & 0x10 == 0
     }
-
-    // fn set_bit(&mut self, k: usize, val: bool) {
-    //     if val {
-    //         self.0 |= 1 << k;
-    //     } else {
-    //         self.0 &= !(1 << k);
-    //     }
-    // }
 }
