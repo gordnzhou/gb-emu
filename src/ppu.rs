@@ -45,8 +45,9 @@ pub struct Ppu {
 
     mode_3_dots: u32,
     cur_pixel_x: usize,
-    win_in_frame: bool,
-    win_counter: u8,
+    wy_cond: bool,
+    wx_cond: bool,
+    win_counter: usize,
 
     obj_buffer_index: usize,
     obj_buffer: Vec<usize>,
@@ -84,7 +85,8 @@ impl Ppu {
 
             mode_3_dots: 0,
             cur_pixel_x: 0,
-            win_in_frame: false,
+            wy_cond: false,
+            wx_cond: false,
             win_counter: 0,
 
             obj_buffer_index: 0,
@@ -140,7 +142,7 @@ impl Ppu {
 
                 if self.ly == LCD_HEIGHT as u8 {
                     // HBlank -> VBlank
-                    self.win_in_frame = false;
+                    self.wy_cond = false;
                     self.win_counter = 0;
                     self.entered_vblank = true;
                     self.last_vblank_scanline = 0;
@@ -148,8 +150,8 @@ impl Ppu {
                     1
                 } else {
                     // HBlank -> OAM Search
-                    self.win_in_frame = self.wy == self.ly;
-                    self.win_counter += if self.win_enabled() && self.win_in_frame { 1 } else { 0 };
+                    self.wy_cond |= self.wy == self.ly;
+                    self.win_counter += (self.win_enabled() && self.wy_cond && self.wx_cond) as usize;
                     2
                 }
             },
@@ -162,6 +164,7 @@ impl Ppu {
                 // OAM Search -> Drawing
                 self.obj_buffer_index = 0;
                 self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
+                self.wx_cond = false;
                 self.mode_3_dots = self.calc_mode_3_dots();
                 3
             },
@@ -200,11 +203,13 @@ impl Ppu {
 
             // TODO: implement BG and OAM FIFO 
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
+                self.wx_cond |= self.wx as usize == self.cur_pixel_x + 7;
+
                 let mut colour = if !self.obj_only() {
 
-                    let tile_data =  if self.win_enabled() && self.win_in_frame {
-                        let tile_pixel_x = self.cur_pixel_x + self.wx as usize - 7;
-                        let tile_pixel_y = (self.win_counter + self.wy) as usize;
+                    let tile_data =  if self.win_enabled() && self.wy_cond && self.wx_cond {
+                        let tile_pixel_x = self.cur_pixel_x + 7 - self.wx as usize;
+                        let tile_pixel_y = self.win_counter - 1;
                         self.fetch_tile(tile_pixel_x, tile_pixel_y, false)
                     } else {
                         let tile_pixel_x = (self.cur_pixel_x + self.scx as usize) % 0xFF;
@@ -229,17 +234,17 @@ impl Ppu {
                     }
 
                     let tile = self.tile_data[if self.obj_size() == 16 {
-                        if self.ly as usize + 24 >= obj_y {
-                            tile_id & 0xFE
-                        } else {
+                        if (self.ly as usize + 8 >= obj_y) ^ (attributes & 0x40 != 0) {
                             tile_id | 0x01
+                        } else {
+                            tile_id & 0xFE
                         }
                     } else {
                         tile_id
                     }];
 
                     let offset_y_lo = if attributes & 0x40 != 0 { ((7 - ((self.ly as usize + 16 - obj_y) & 7)) << 1) + 1 } else { ((self.ly as usize + 16 - obj_y) & 7) << 1 };
-                    let offset_y_hi = if attributes & 0x40 != 0 { offset_y_lo.wrapping_sub(1) } else { offset_y_lo.wrapping_add(1) };
+                    let offset_y_hi = if attributes & 0x40 != 0 { offset_y_lo - 1 } else { offset_y_lo + 1 };
                     let offset_x = if attributes & 0x20 != 0 { 1 << ((self.cur_pixel_x + 8 - obj_x) & 7)} else { 0x80 >> ((self.cur_pixel_x + 8 - obj_x) & 7) };
 
                     let pixel_lo = (tile[offset_y_lo] & offset_x != 0) as u8;
@@ -317,13 +322,13 @@ impl Ppu {
     fn calc_mode_3_dots(&self) -> u32 {
         let mut res = MODE_3_MIN_DOTS + (self.scx % 8) as u32;
 
-        if self.win_enabled() && self.win_in_frame {
+        if self.win_enabled() && self.wy_cond {
             res += 6;
         }
 
         for i in &self.obj_buffer {
             let x = self.oam[*i][1];
-            let offset = if self.win_enabled() && self.win_in_frame && x + 7 <= self.wx { 
+            let offset = if self.win_enabled() && self.wy_cond && x + 7 <= self.wx { 
                 0xFF - self.wx 
             } else { 
                 self.scx 
