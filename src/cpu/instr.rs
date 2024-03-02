@@ -294,7 +294,7 @@ impl Cpu {
             // 0xFD => _,
             0xFE => self.cp_a_n8(),
             0xFF => self.rst(0x38 ),
-            _ => panic!("Unknown Opcode Encountered! {:#03x}", opcode),
+            _ => { 1 },
         }
     }
 

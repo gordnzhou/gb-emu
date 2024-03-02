@@ -9,9 +9,6 @@ use sdl2::EventPump;
 
 use crate::cpu::Cpu;
 
-const BOOTROM_PATH: &str = "roms/bootrom";
-
-
 // in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
 pub const KEYMAPPINGS: [Keycode; 8] = [
     Keycode::I,
@@ -48,7 +45,7 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new(screen_scale: i32, rom_path: &str, with_bootrom: bool) -> Result<Self, String> {
+    pub fn new(screen_scale: i32, rom_path: &str, skip_bootrom: bool) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
         let video_subsystem = sdl_context.video()?;
         // let audio_subsystem = sdl_context.audio()?;
@@ -56,17 +53,17 @@ impl Emulator {
         let window = Emulator::build_window(video_subsystem, screen_scale as u32)?;
         let canvas: Canvas<Window> = window.into_canvas().build().map_err(|e| e.to_string())?;
 
-        let cpu = if with_bootrom {
-            // TODO: implement unmapping of bootrom once it finishes running
+        let mut cpu = if !skip_bootrom {
             let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0);
-            cpu.memory.load_rom(rom_path);
-            cpu.memory.load_rom(BOOTROM_PATH);
+            cpu.memory.rom.load_bootrom();
             cpu
         } else {
             let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
-            cpu.memory.load_rom(rom_path);
+            cpu.memory.rom.write_bank(1);
             cpu
         };
+
+        cpu.memory.rom.load_from_file(rom_path);
 
         Ok(Emulator {
             event_pump,
@@ -108,6 +105,11 @@ impl Emulator {
                 if self.cpu.memory.ppu.entered_vblank {
                     self.draw_window(self.cpu.memory.ppu.frame_buffer);
                 }
+            }
+
+            match self.get_events() {
+                Ok(_) => self.cpu.memory.joypad.step(self.key_status),
+                Err(e) => panic!("{}", e)
             }
         }
     }

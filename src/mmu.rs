@@ -5,15 +5,12 @@ use crate::timer::Timer;
 use crate::rom::Rom;
 use crate::cpu::Interrupt;
 
-use std::fs::File;
-use std::io::{self, Read};
-
 const WRAM_SIZE: usize = 0x2000;
 const HRAM_SIZE: usize = 0x0080;
-const TOTAL_SIZE: usize = 0x10000;
+// const TOTAL_SIZE: usize = 0x10000;
 
 pub struct Mmu {
-    rom: Rom,
+    pub rom: Rom,
     pub joypad: Joypad,
     pub apu: Apu,
     pub ppu: Ppu,
@@ -27,7 +24,7 @@ pub struct Mmu {
     old_tma: u8, 
 
     // for unused addresses
-    total_memory: [u8; TOTAL_SIZE],
+    // total_memory: [u8; TOTAL_SIZE],
 }
 
 impl Mmu {
@@ -43,7 +40,7 @@ impl Mmu {
             interrupt_enable: 0,
             interrupt_flag: 0,
 
-            total_memory: [0; TOTAL_SIZE],
+            // total_memory: [0; TOTAL_SIZE],
             serial_output: String::new(),
             old_tma: 0,
         }
@@ -79,10 +76,11 @@ impl Mmu {
             0xFF49 => self.ppu.read_obp1(),
             0xFF4A => self.ppu.read_wy(),
             0xFF4B => self.ppu.read_wx(),
+            0xFF50 => self.rom.read_bank(),
             // IO registers from 0xFF4D to 0xFF77 are have special uses only in CGB
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80],
             0xFFFF => self.interrupt_enable,
-            _ => self.total_memory[addr]
+            _ => 0xFF
         };
 
         byte
@@ -98,9 +96,9 @@ impl Mmu {
         let addr = addr as usize;
 
         match addr {
-            0x0000..=0x7FFF => self.rom.write_rom(addr, byte),
+            0x0000..=0x7FFF => {},
             0x8000..=0x9FFF => self.ppu.write_vram(addr, byte),
-            0xA000..=0xBFFF => self.rom.write_eram(addr, byte),
+            0xA000..=0xBFFF => {},
             0xC000..=0xDFFF => self.wram[addr - 0xC000] = byte,
             0xE000..=0xFDFF => self.wram[addr - 0xE000] = byte,
             0xFE00..=0xFE9F => self.ppu.write_oam(addr, byte),
@@ -128,10 +126,11 @@ impl Mmu {
             0xFF49 => self.ppu.write_obp1(byte),
             0xFF4A => self.ppu.write_wy(byte),
             0xFF4B => self.ppu.write_wx(byte),
+            0xFF50 => self.rom.write_bank(byte),
             // IO registers from 0xFF4D to 0xFF77 are have special uses only in CGB
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80] = byte,
             0xFFFF => self.interrupt_enable = byte,
-            _ => self.total_memory[addr] = byte,
+            _ => {},
         }
     }
 
@@ -150,7 +149,6 @@ impl Mmu {
     }
 
     /// Steps through components, updating interrupt flag.
-    // TODO: refactor interrupt representation to be updated as struct fields for each respective component
     pub fn step(&mut self, cycles: u8) {
         self.ppu.step(cycles);
     
@@ -190,30 +188,5 @@ impl Mmu {
             Interrupt::Serial => self.interrupt_flag |= 1 << 3,
             Interrupt::Joypad => self.interrupt_flag |= 1 << 4,
         }
-    }
-
-    pub fn load_rom(&mut self, rom_path: &str) {
-        match Mmu::read_rom_from_file(rom_path) {
-            Ok(rom_data) => {
-                for i in 0..rom_data.len() {
-                    self.write_byte(i as u16, rom_data[i]);
-                }
-
-                println!("Sucessfully read ROM of size {} bytes.", rom_data.len());
-                println!("First bytes: {:?}", &rom_data[..16]);
-            }
-            Err(err) => {
-                eprintln!("Error reading ROM file: {}", err);
-            }
-        }
-    }
-
-    fn read_rom_from_file(file_path: &str) -> io::Result<Vec<u8>> {
-        let mut file = File::open(file_path)?;
-
-        let mut rom_data = Vec::new();
-        file.read_to_end(&mut rom_data)?;
-
-        Ok(rom_data)
     }
 }

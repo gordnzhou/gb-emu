@@ -133,7 +133,7 @@ mod tests {
     fn cpu_instr_test() {
         'outer: for test in TEST_FILES {
             let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
-            cpu.memory.load_rom(&*format!("roms/{}", test));
+            cpu.memory.rom.load_from_file(&*format!("roms/{}", test));
 
             let mut cycles: u64 = 0;
             while cycles < TIMEOUT {
