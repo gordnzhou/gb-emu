@@ -2,15 +2,15 @@ use crate::joypad::Joypad;
 use crate::apu::Apu;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
-use crate::rom::Rom;
+use crate::memory::Memory;
 use crate::cpu::Interrupt;
 
 const WRAM_SIZE: usize = 0x2000;
 const HRAM_SIZE: usize = 0x0080;
 // const TOTAL_SIZE: usize = 0x10000;
 
-pub struct Mmu {
-    pub rom: Rom,
+pub struct Bus {
+    pub memory: Memory,
     pub joypad: Joypad,
     pub apu: Apu,
     pub ppu: Ppu,
@@ -27,10 +27,10 @@ pub struct Mmu {
     // total_memory: [u8; TOTAL_SIZE],
 }
 
-impl Mmu {
+impl Bus {
     pub fn new() -> Self {
-        Mmu {
-            rom: Rom::new(),
+        Bus {
+            memory: Memory::new(),
             joypad: Joypad::new(),
             apu: Apu::new(),
             ppu: Ppu::new(),
@@ -38,7 +38,7 @@ impl Mmu {
             wram: [0; WRAM_SIZE],
             hram: [0; HRAM_SIZE],
             interrupt_enable: 0,
-            interrupt_flag: 0,
+            interrupt_flag: 0xE0,
 
             // total_memory: [0; TOTAL_SIZE],
             serial_output: String::new(),
@@ -50,9 +50,9 @@ impl Mmu {
         let addr = addr as usize;
 
         let byte = match addr {
-            0x0000..=0x7FFF => self.rom.read_rom(addr),
+            0x0000..=0x7FFF => self.memory.read_rom(addr),
             0x8000..=0x9FFF => self.ppu.read_vram(addr),
-            0xA000..=0xBFFF => self.rom.read_eram(addr),
+            0xA000..=0xBFFF => self.memory.read_eram(addr),
             0xC000..=0xDFFF => self.wram[addr - 0xC000],
             0xE000..=0xFDFF => self.wram[addr - 0xE000],
             0xFE00..=0xFE9F => self.ppu.read_oam(addr),
@@ -76,7 +76,7 @@ impl Mmu {
             0xFF49 => self.ppu.read_obp1(),
             0xFF4A => self.ppu.read_wy(),
             0xFF4B => self.ppu.read_wx(),
-            0xFF50 => self.rom.read_bank(),
+            0xFF50 => self.memory.read_bank(),
             // IO registers from 0xFF4D to 0xFF77 are have special uses only in CGB
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80],
             0xFFFF => self.interrupt_enable,
@@ -109,7 +109,7 @@ impl Mmu {
             0xFF05 => self.timer.write_tima(byte),
             0xFF06 => { self.old_tma = self.timer.read_tima(); self.timer.write_tma(byte)},
             0xFF07 => self.timer.write_tac(byte),
-            0xFF0F => self.interrupt_flag = byte,
+            0xFF0F => self.interrupt_flag = 0xE0 | byte,
             // TODO: sound registers
             0xFF40 => self.ppu.write_lcdc(byte),
             0xFF41 => self.ppu.write_stat(byte),
@@ -126,7 +126,7 @@ impl Mmu {
             0xFF49 => self.ppu.write_obp1(byte),
             0xFF4A => self.ppu.write_wy(byte),
             0xFF4B => self.ppu.write_wx(byte),
-            0xFF50 => self.rom.write_bank(byte),
+            0xFF50 => self.memory.write_bank(byte),
             // IO registers from 0xFF4D to 0xFF77 are have special uses only in CGB
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80] = byte,
             0xFFFF => self.interrupt_enable = byte,

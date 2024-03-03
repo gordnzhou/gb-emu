@@ -1,16 +1,19 @@
 mod instr;
+mod register;
 
-use crate::mmu::Mmu;
-use crate::register::Register;
-use crate::cpu::Interrupt::*;
+use self::register::Register;
+use self::Interrupt::*;
+
+use crate::bus::Bus;
 
 pub struct Cpu {
-    pub memory: Mmu,
+    pub bus: Bus,
 
     pub(self) scheduled_ei: bool,
     pub(self) ime: bool,
     pub(self) halted: bool,
     pub(self) halt_bug: bool,
+    pub(self) halt_triggered: bool,
 
     pub(self) af: Register,
     pub(self) bc: Register,
@@ -31,11 +34,12 @@ pub enum Interrupt {
 impl Cpu {
     pub fn new(af: u16, bc: u16, de: u16, hl: u16, pc: u16, sp: u16) -> Self {
         Cpu { 
-            memory: Mmu::new(),
+            bus: Bus::new(),
             scheduled_ei: false,
             ime: false,
             halted: false,
             halt_bug: false,
+            halt_triggered: false,
             af: Register(af),
             bc: Register(bc),
             de: Register(de),
@@ -50,13 +54,15 @@ impl Cpu {
     pub fn step(&mut self) -> u8 {
         let cycles = self.cycle();
 
-        self.memory.step(cycles);
+        self.bus.step(cycles);
         
         cycles
     }
 
     /// Do a CPU fetch-execute cycle and return the number of clock M-cycles taken.
     fn cycle(&mut self) -> u8 {
+        self.halt_triggered = false;
+
         if self.scheduled_ei {
             self.ime = true;
             self.scheduled_ei = false;
@@ -72,7 +78,7 @@ impl Cpu {
             Some(interrupt) => {
                 if self.ime {
                     cycles += self.handle_interrupt(interrupt);
-                } else if self.halted {
+                } else if self.halt_triggered {
                     self.halt_bug = true;
                 }
 
@@ -87,8 +93,8 @@ impl Cpu {
     
     /// Returns the next pending interrupt by priority
     fn get_pending_interrupt(&mut self) -> Option<Interrupt>{
-        let interrupt_enable: u8 =  self.memory.read_byte(0xFFFF);
-        let interrupt_flag: u8 = self.memory.read_byte(0xFF0F);
+        let interrupt_enable: u8 =  self.bus.read_byte(0xFFFF);
+        let interrupt_flag: u8 = self.bus.read_byte(0xFF0F);
 
         for bit in 0..=4 {   
             if interrupt_enable & (1 << bit) != 0 && interrupt_flag & (1 << bit) != 0 {
@@ -133,16 +139,16 @@ mod tests {
     fn cpu_instr_test() {
         'outer: for test in TEST_FILES {
             let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
-            cpu.memory.rom.load_from_file(&*format!("roms/{}", test));
+            cpu.bus.memory.load_from_file(&*format!("roms/{}", test));
 
             let mut cycles: u64 = 0;
             while cycles < TIMEOUT {
                 cycles += cpu.step() as u64;
 
-                if cpu.memory.serial_output.contains("Passed") {
+                if cpu.bus.serial_output.contains("Passed") {
                     println!("Passed cpu_test {}", test);
                     continue 'outer
-                } else if cpu.memory.serial_output.contains("Failed") {
+                } else if cpu.bus.serial_output.contains("Failed") {
                     break;
                 }
             } 

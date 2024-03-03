@@ -7,16 +7,17 @@ const ROM_SIZE: usize = 0x8000;
 const ERAM_SIZE: usize = 0x2000;
 const BOOTROM_SIZE: usize = 0x100;
 
-pub struct Rom {
+pub struct Memory {
     rom: [u8; ROM_SIZE],
     eram: [u8; ERAM_SIZE],
     bootrom: [u8; BOOTROM_SIZE],
     bank: u8,
 }
 
-impl Rom {
+// TODO: add MBC support
+impl Memory {
     pub fn new() -> Self {
-        Rom { 
+        Memory { 
             rom: [0; ROM_SIZE],
             eram: [0; ERAM_SIZE],
             bootrom: [0; BOOTROM_SIZE],
@@ -34,7 +35,7 @@ impl Rom {
     }
     
     pub fn load_from_file(&mut self, rom_path: &str) {
-        match Rom::read_from_file(rom_path) {
+        match Memory::read_from_file(rom_path) {
             Ok(rom_data) => {
                 for i in 0..rom_data.len() {
                     self.rom[i] = rom_data[i];
@@ -53,7 +54,7 @@ impl Rom {
     pub fn load_bootrom(&mut self) {
         self.bank = 0;
 
-        match Rom::read_from_file(BOOTROM_PATH) {
+        match Memory::read_from_file(BOOTROM_PATH) {
             Ok(rom_data) => {
                 for i in 0..BOOTROM_SIZE {
                     self.bootrom[i] = rom_data[i];

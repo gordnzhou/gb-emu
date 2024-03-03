@@ -55,13 +55,13 @@ impl Emulator {
 
         let mut cpu = if !skip_bootrom {
             let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0);
-            cpu.memory.rom.load_bootrom();
+            cpu.bus.memory.load_bootrom();
             cpu
         } else {
             Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE)
         };
 
-        cpu.memory.rom.load_from_file(rom_path);
+        cpu.bus.memory.load_from_file(rom_path);
 
         Ok(Emulator {
             event_pump,
@@ -100,13 +100,13 @@ impl Emulator {
 
                 cpu_duration_ns = 4.0 * cycles as f32 * DOT_DURATION_NS;
 
-                if self.cpu.memory.ppu.entered_vblank {
-                    self.draw_window(self.cpu.memory.ppu.frame_buffer);
+                if self.cpu.bus.ppu.entered_vblank {
+                    self.draw_window(self.cpu.bus.ppu.frame_buffer);
                 }
             }
 
             match self.get_events() {
-                Ok(_) => self.cpu.memory.joypad.step(self.key_status),
+                Ok(_) => self.cpu.bus.joypad.step(self.key_status),
                 Err(e) => panic!("{}", e)
             }
         }
@@ -127,13 +127,13 @@ impl Emulator {
                 cpu_duration_ns = (4.0 * cycles as f32 * DOT_DURATION_NS) as u64;
                 dur_ns += cpu_duration_ns;
 
-                if self.cpu.memory.ppu.entered_vblank {
-                    self.draw_window(self.cpu.memory.ppu.frame_buffer);
+                if self.cpu.bus.ppu.entered_vblank {
+                    self.draw_window(self.cpu.bus.ppu.frame_buffer);
                 }
             }
 
             match self.get_events() {
-                Ok(_) => self.cpu.memory.joypad.step(self.key_status),
+                Ok(_) => self.cpu.bus.joypad.step(self.key_status),
                 Err(e) => panic!("{}", e)
             }
         } 

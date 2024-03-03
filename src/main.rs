@@ -1,13 +1,12 @@
 extern crate sdl2;
 
-mod register;
 mod cpu;
-mod mmu;
+mod bus;
 mod ppu;
 mod apu;
 mod joypad;
 mod timer;
-mod rom;
+mod memory;
 mod emulator;
 
 use emulator::Emulator;
@@ -15,7 +14,7 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/dmg-acid2.gb";
+const ROM_PATH: &str = "roms/halt_bug.gb";
 
 const SCREEN_SCALE: i32 = 3;
 
