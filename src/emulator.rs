@@ -58,9 +58,7 @@ impl Emulator {
             cpu.memory.rom.load_bootrom();
             cpu
         } else {
-            let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
-            cpu.memory.rom.write_bank(1);
-            cpu
+            Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE)
         };
 
         cpu.memory.rom.load_from_file(rom_path);

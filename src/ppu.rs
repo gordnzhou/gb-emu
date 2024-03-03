@@ -205,79 +205,118 @@ impl Ppu {
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
                 self.wx_cond |= self.wx as usize == self.cur_pixel_x + 7;
 
-                let mut colour = if !self.obj_only() {
-
-                    let tile_data =  if self.win_enabled() && self.wy_cond && self.wx_cond {
-                        let tile_pixel_x = self.cur_pixel_x + 7 - self.wx as usize;
-                        let tile_pixel_y = self.win_counter - 1;
-                        self.fetch_tile(tile_pixel_x, tile_pixel_y, false)
-                    } else {
-                        let tile_pixel_x = (self.cur_pixel_x + self.scx as usize) % 0xFF;
-                        let tile_pixel_y = (self.ly as usize + self.scy as usize) % 0xFF;
-                        self.fetch_tile(tile_pixel_x, tile_pixel_y, true)
-                    };
-
-                    Ppu::apply_palette(&tile_data, &self.bgp)
-                } else { 0 };
-
-                for index in &self.obj_buffer {
-                    if !self.obj_enabled() {
-                        break;
-                    }
-                    let obj_y = self.oam[*index][0] as usize; // actual screen y pos = obj_y - 16
-                    let obj_x = self.oam[*index][1] as usize; // actual screen x pos = obj_x - 8
-                    let tile_id = self.oam[*index][2] as usize;
-                    let attributes = self.oam[*index][3];
-
-                    if !(obj_x <= self.cur_pixel_x + 8 && self.cur_pixel_x < obj_x) {
-                        continue;
-                    }
-
-                    let tile = self.tile_data[if self.obj_size() == 16 {
-                        if (self.ly as usize + 8 >= obj_y) ^ (attributes & 0x40 != 0) {
-                            tile_id | 0x01
-                        } else {
-                            tile_id & 0xFE
-                        }
-                    } else {
-                        tile_id
-                    }];
-
-                    let offset_y_lo = if attributes & 0x40 != 0 { ((7 - ((self.ly as usize + 16 - obj_y) & 7)) << 1) + 1 } else { ((self.ly as usize + 16 - obj_y) & 7) << 1 };
-                    let offset_y_hi = if attributes & 0x40 != 0 { offset_y_lo - 1 } else { offset_y_lo + 1 };
-                    let offset_x = if attributes & 0x20 != 0 { 1 << ((self.cur_pixel_x + 8 - obj_x) & 7)} else { 0x80 >> ((self.cur_pixel_x + 8 - obj_x) & 7) };
-
-                    let pixel_lo = (tile[offset_y_lo] & offset_x != 0) as u8;
-                    let pixel_hi = (tile[offset_y_hi] & offset_x != 0) as u8;
-
-                    let id = (pixel_hi << 1) | pixel_lo;
-
-                    if attributes & 0x80 == 0 && id != 0 { 
-                        let palette = if attributes & 0x10 == 0 { self.obp0 } else { self.obp1 };
-                        colour = Ppu::apply_palette(&id, &palette);
-                    }
-                    break;
-                }
-
+                let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize);
                 self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
+
                 self.cur_pixel_x += 1;
                 pixels_left -= 1;
             }
+
         }  else if self.mode == 1 {
             if self.last_vblank_scanline + dots >= SCAN_LINE_DOTS {
                 self.ly += 1;
             }
             self.last_vblank_scanline = (self.last_vblank_scanline + dots) % SCAN_LINE_DOTS;
+
         }
 
         self.update_stat();
     }
 
-    /// Returns colour id located at (x, y) in bg/window tile map.
-    /// 0 <= x, y <= 255
-    fn fetch_tile(&self, x: usize, y: usize, is_bg: bool) -> u8 {
-        let tmap_addr = (x >> 3) + ((y >> 3) << 5);
+    fn render_pixel(&self, lcd_x: usize, lcd_y: usize) -> u8 {
+        let mut colour = self.render_bgwin_pixel(lcd_x, lcd_y);
+        colour = self.render_obj_pixel(colour, lcd_x, lcd_y);
+        colour
+    }
 
+    fn render_bgwin_pixel(&self, lcd_x: usize, lcd_y: usize) -> u8 {
+        if self.obj_only() {
+            return 0;
+        }
+
+        let tile_data =  if self.win_enabled() && self.wy_cond && self.wx_cond {
+            let x = lcd_x + 7 - self.wx as usize;
+            let y = self.win_counter - 1;
+            self.fetch_bgwin_tile(x, y, false)
+        } else {
+            let x = (lcd_x + self.scx as usize) % 0xFF;
+            let y = (lcd_y as usize + self.scy as usize) % 0xFF;
+            self.fetch_bgwin_tile(x, y, true)
+        };
+
+        Ppu::apply_palette(&tile_data, &self.bgp)
+    }
+
+    fn render_obj_pixel(&self, bg_colour: u8, lcd_x: usize, lcd_y: usize) -> u8 {
+        let mut colour = bg_colour;
+
+        for index in &self.obj_buffer {
+            if !self.obj_enabled() {
+                break;
+            }
+
+            let obj_y = self.oam[*index][0] as usize; // actual screen y pos = obj_y - 16
+            let obj_x = self.oam[*index][1] as usize; // actual screen x pos = obj_x - 8
+            let tile_id = self.oam[*index][2] as usize;
+            let attributes = self.oam[*index][3];
+            let x_flip = attributes & 0x20 != 0;
+            let y_flip = attributes & 0x40 != 0;
+
+            if !(obj_x <= lcd_x + 8 && lcd_x < obj_x) {
+                continue;
+            }
+
+            let tile_id = if self.obj_size() == 16 {
+                if (lcd_y as usize + 8 >= obj_y) ^ y_flip {
+                    tile_id | 0x01
+                } else {
+                    tile_id & 0xFE
+                }
+            } else {
+                tile_id
+            };
+
+            let tile_x = lcd_x + 8 - obj_x;
+            let tile_y = lcd_y as usize + 16 - obj_y;
+            let id = self.fetch_tile_pixel(false, tile_id as u8, tile_x, tile_y, x_flip, y_flip);
+
+            if id != 0 { 
+                let palette = if attributes & 0x10 == 0 { self.obp0 } else { self.obp1 };
+
+                if attributes & 0x80 == 0 {
+                    colour = Ppu::apply_palette(&id, &palette);
+                } else if colour == 0 {
+                    colour = Ppu::apply_palette(&id, &palette);
+                }
+
+                break;
+            }
+        }
+
+        colour
+    }
+
+    /// Returns colour id from tile_id's tile at (tile_x, tile_y).
+    /// Set addr_mode to false for 0x8000 tile_data addressing, true for 0x8800 addressing.
+    fn fetch_tile_pixel(&self, addr_mode: bool, tile_id: u8, tile_x: usize, tile_y: usize, x_flip: bool, y_flip: bool) -> u8 {
+        let tile = self.tile_data[if !addr_mode { 
+            tile_id as usize
+        } else {
+            (256 + (tile_id as i8) as i16) as usize
+        }];
+
+        let y = if y_flip { (7 - (tile_y as usize & 7)) << 1 } else { (tile_y as usize & 7) << 1 };
+        let x =  if x_flip { 1 << (tile_x & 7) } else { 0x80 >> (tile_x % 8) };
+
+        let pixel_lo = (tile[y] & x != 0) as u8;
+        let pixel_hi = (tile[y + 1] & x != 0) as u8;
+
+        (pixel_hi << 1) | pixel_lo
+    }
+
+    /// Returns colour id of pixel at (x, y) from bg/window tile map.
+    fn fetch_bgwin_tile(&self, x: usize, y: usize, is_bg: bool) -> u8 {
+        let tmap_addr = (x >> 3) + ((y >> 3) << 5);
         let lcd_bit = if is_bg { 0x08 } else { 0x40 };
         let tile_id = if self.lcdc & lcd_bit == 0 { 
             self.tile_map0[tmap_addr] 
@@ -285,17 +324,7 @@ impl Ppu {
             self.tile_map1[tmap_addr] 
         };
 
-        let tile = self.tile_data[if self.lcdc & 0x10 != 0 { 
-            tile_id as usize 
-        } else {
-            (256 + (tile_id as i8) as i16) as usize
-        }];
-
-        let offset = (y as usize & 7) << 1;
-        let pixel_lo = (tile[offset] & (0x80 >> (x % 8)) != 0) as u8;
-        let pixel_hi = (tile[offset + 1] & (0x80 >> (x % 8)) != 0) as u8;
-
-        (pixel_hi << 1) | pixel_lo
+        self.fetch_tile_pixel(self.lcdc & 0x10 == 0, tile_id, x, y, false, false)
     }
 
     /// updates STAT register and updates stat line
@@ -517,4 +546,36 @@ impl Ppu {
         self.wx = byte 
     }
     
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cpu::Cpu;
+
+    use super::{LCD_HEIGHT, LCD_WIDTH};
+
+    const TEST_FILE: &str = "roms/dmg-acid2.gb";
+    const CHECKSUM: u32 = 203719462;
+
+    #[test]
+    fn ppu_test() {
+        let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
+        cpu.memory.rom.load_from_file(TEST_FILE);
+
+        let mut cycles: u32 = 0;
+
+        while cycles < 5000000 {
+            cycles += cpu.step() as u32;
+        } 
+
+        let mut sum: u32 = 0;
+        
+        for y in 0..LCD_HEIGHT {
+            for x in 0..LCD_WIDTH {
+                sum = sum.wrapping_add((cpu.memory.ppu.frame_buffer[y][x] as u32).wrapping_mul((x + LCD_WIDTH * y) as u32));
+            }
+        }
+
+        assert!(sum == CHECKSUM, "checksum mismatch: got {} but expected {}", sum, CHECKSUM);
+    }
 }

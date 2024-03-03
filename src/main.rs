@@ -15,7 +15,7 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/tetris.gb";
+const ROM_PATH: &str = "roms/dmg-acid2.gb";
 
 const SCREEN_SCALE: i32 = 3;
 

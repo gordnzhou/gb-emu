@@ -20,7 +20,7 @@ impl Rom {
             rom: [0; ROM_SIZE],
             eram: [0; ERAM_SIZE],
             bootrom: [0; BOOTROM_SIZE],
-            bank: 0,
+            bank: 1,
         }
     }
 
@@ -32,7 +32,7 @@ impl Rom {
     pub fn read_bank(&self) -> u8 {
         self.bank
     }
-
+    
     pub fn load_from_file(&mut self, rom_path: &str) {
         match Rom::read_from_file(rom_path) {
             Ok(rom_data) => {
@@ -49,7 +49,10 @@ impl Rom {
         }
     }
 
+    /// loads in boot ROM, setting BANK register to 0
     pub fn load_bootrom(&mut self) {
+        self.bank = 0;
+
         match Rom::read_from_file(BOOTROM_PATH) {
             Ok(rom_data) => {
                 for i in 0..BOOTROM_SIZE {
