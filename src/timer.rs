@@ -7,6 +7,7 @@ pub struct Timer {
     tma: u8,
     tac: u8,
 
+    next_tma: i32,
     div_cycles: u32,
     tima_cycles: u32,
 }
@@ -22,6 +23,8 @@ impl Timer {
             // number of M-cycles passed after div/tima was incremented
             div_cycles: 0,
             tima_cycles: 0,
+
+            next_tma: -1,
         }
     }
 
@@ -56,8 +59,8 @@ impl Timer {
 
         let mut tima_overflow = false;
 
-        let mut cycles = self.tima_cycles + cycles;
-        while cycles >= cycles_per_tima_inc {
+        let mut cycles_elapsed = self.tima_cycles + cycles;
+        while cycles_elapsed >= cycles_per_tima_inc {
             self.tima = self.tima.wrapping_add(1);
             
             if self.tima == 0 {
@@ -65,44 +68,36 @@ impl Timer {
                 self.tima = self.tma;
             }
 
-            cycles = cycles - cycles_per_tima_inc;
+            cycles_elapsed = cycles_elapsed - cycles_per_tima_inc;
         }
         
         self.tima_cycles = (self.tima_cycles + cycles) % cycles_per_tima_inc;
 
+        if self.next_tma != -1 {
+            self.tma = self.next_tma as u8;
+            self.next_tma = -1;
+        }
+
         tima_overflow
     }
 
-    pub fn read_div(&self) -> u8 {
-        self.div
+    pub fn read_io(&self, addr: usize) -> u8 {
+        match addr {
+            0xFF04 => self.div,
+            0xFF05 => self.tima,
+            0xFF06 => self.tma,
+            0xFF07 => self.tac,
+            _ => unreachable!()
+        }
     }
 
-    /// Writing to div sets it to 0x00.
-    pub fn write_div(&mut self, _byte: u8) {
-        self.div = 0x00;
-    }
-
-    pub fn read_tima(&self) -> u8 {
-        self.tima
-    }
-
-    pub fn write_tima(&mut self, byte: u8) {
-        self.tima = byte;
-    }
-
-    pub fn read_tma(&self) -> u8 {
-        self.tma
-    }
-
-    pub fn write_tma(&mut self, byte: u8) {
-        self.tma = byte;
-    }
-
-    pub fn read_tac(&self) -> u8 {
-        self.tac
-    }
-
-    pub fn write_tac(&mut self, byte: u8) {
-        self.tac = byte;
+    pub fn write_io(&mut self, addr: usize, byte: u8) {
+        match addr {
+            0xFF04 => self.div = 0x00,
+            0xFF05 => self.tima = byte,
+            0xFF06 => self.next_tma = byte as i32,
+            0xFF07 => self.tac = byte,
+            _ => unreachable!()
+        };
     }
 }

@@ -17,7 +17,6 @@ const MODE_2_DOTS: u32 = 80;
 const MODE_3_MIN_DOTS: u32 = 172;
 
 pub struct Ppu {
-    // 16-byte types stored here
     tile_data: [[u8; TILE_SIZE]; TILE_ENTRIES],
     tile_map0: [u8; TILE_MAP_SIZE],
     tile_map1: [u8; TILE_MAP_SIZE],
@@ -199,15 +198,17 @@ impl Ppu {
             }
 
         } else if self.mode == 3 {
+            // draw 
             let mut pixels_left = dots;
 
-            // TODO: implement BG and OAM FIFO 
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
                 self.wx_cond |= self.wx as usize == self.cur_pixel_x + 7;
 
+                // future todo: implement BG and OAM FIFO 
                 let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize);
-                self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
 
+                self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
+                
                 self.cur_pixel_x += 1;
                 pixels_left -= 1;
             }
@@ -441,18 +442,53 @@ impl Ppu {
         }
     }
 
-    pub fn read_lcdc(&self) -> u8 {
-        self.lcdc
+    pub fn read_io(&self, addr: usize,) -> u8 {
+        match addr {
+            0xFF40 => self.lcdc,
+            0xFF41 => self.read_stat(),
+            0xFF42 => self.scx,
+            0xFF43 => self.scy,
+            0xFF44 => self.read_ly(),
+            0xFF45 => self.lyc,
+            0xFF46 => self.dma,
+            0xFF47 => self.bgp,
+            0xFF48 => self.obp0,
+            0xFF49 => self.obp1,
+            0xFF4A => self.wy,
+            0xFF4B => self.wx,
+            _ => unreachable!()
+        }
     }
 
-    pub fn write_lcdc(&mut self, byte: u8) {
+    /// Writes to PPU registers; returns true if DMA transfer is triggered.
+    pub fn write_io(&mut self, addr: usize, byte: u8) -> bool {
+        match addr {
+            0xFF40 => self.write_lcdc(byte),
+            0xFF41 => self.write_stat(byte),
+            0xFF42 => self.scx = byte,
+            0xFF43 => self.scy = byte,
+            0xFF44 => {},
+            0xFF45 => self.lyc = byte,
+            0xFF46 => self.dma = byte,
+            0xFF47 => self.bgp = byte,
+            0xFF48 => self.obp0 = byte,
+            0xFF49 => self.obp1 = byte,
+            0xFF4A => self.wy = byte,
+            0xFF4B => self.wx = byte,
+            _ => unreachable!()
+        };
+
+        addr == 0xFF46
+    }
+
+    fn write_lcdc(&mut self, byte: u8) {
         if self.lcdc & 0x80 == 0 && byte & 0x80 != 0 {
             self.reset_lcd();   
         }
         self.lcdc = byte; 
     }
 
-    pub fn read_stat(&self) -> u8 {
+    fn read_stat(&self) -> u8 {
         if self.lcd_ppu_disabled() {
             self.stat & 0xFC
         } else {
@@ -460,90 +496,18 @@ impl Ppu {
         }
     }
 
-    /// Bottom three bits are read-only.
-    pub fn write_stat(&mut self, byte: u8) {
+    fn write_stat(&mut self, byte: u8) {
+        // Bottom three bits are read-only.
         let stat = self.stat & 0x07;
         self.stat = (byte & 0xF8) | stat;
     }
 
-    pub fn read_scy(&self) -> u8 {
-        self.scy
-    }
-
-    pub fn write_scy(&mut self, byte: u8) {
-        self.scy = byte
-    }
-
-    pub fn read_scx(&self) -> u8 {
-        self.scx
-    }
-
-    pub fn write_scx(&mut self, byte: u8) {
-        self.scx = byte
-    }
-
-    pub fn read_ly(&self) -> u8 {
+    fn read_ly(&self) -> u8 {
         if self.lcd_ppu_disabled() {
             0
         } else {
             self.ly
         }
-    }
-
-    pub fn read_lyc(&self) -> u8 {
-        self.lyc
-    }
-
-    pub fn write_lyc(&mut self, byte: u8) {
-        self.lyc = byte
-    }
-
-    pub fn read_dma(&self) -> u8 {
-        self.dma
-    }
-
-    pub fn write_dma(&mut self, byte: u8) {
-        self.dma = byte
-    }
-
-    pub fn read_bgp(&self) -> u8 { 
-        self.bgp
-    }
-
-    pub fn write_bgp(&mut self, byte: u8) { 
-        self.bgp = byte 
-    }
-
-    pub fn read_obp0(&self) -> u8 { 
-        self.obp0 
-    }
-
-    pub fn write_obp0(&mut self, byte: u8) { 
-        self.obp0 = byte 
-    }
-
-    pub fn read_obp1(&self) -> u8 { 
-        self.obp1 
-    }
-
-    pub fn write_obp1(&mut self, byte: u8) { 
-        self.obp1 = byte 
-    }
-
-    pub fn read_wy(&self) -> u8 { 
-        self.wy 
-    }
-
-    pub fn write_wy(&mut self, byte: u8) { 
-        self.wy = byte 
-    }
-
-    pub fn read_wx(&self) -> u8 { 
-        self.wx 
-    }
-
-    pub fn write_wx(&mut self, byte: u8) { 
-        self.wx = byte 
     }
     
 }

@@ -14,7 +14,7 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/halt_bug.gb";
+const ROM_PATH: &str = "roms/instr_timing.gb";
 
 const SCREEN_SCALE: i32 = 3;
 
