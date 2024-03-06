@@ -446,8 +446,8 @@ impl Ppu {
         match addr {
             0xFF40 => self.lcdc,
             0xFF41 => self.read_stat(),
-            0xFF42 => self.scx,
-            0xFF43 => self.scy,
+            0xFF42 => self.scy,
+            0xFF43 => self.scx,
             0xFF44 => self.read_ly(),
             0xFF45 => self.lyc,
             0xFF46 => self.dma,
@@ -465,8 +465,8 @@ impl Ppu {
         match addr {
             0xFF40 => self.write_lcdc(byte),
             0xFF41 => self.write_stat(byte),
-            0xFF42 => self.scx = byte,
-            0xFF43 => self.scy = byte,
+            0xFF42 => self.scy = byte,
+            0xFF43 => self.scx = byte,
             0xFF44 => {},
             0xFF45 => self.lyc = byte,
             0xFF46 => self.dma = byte,

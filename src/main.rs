@@ -14,7 +14,7 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/instr_timing.gb";
+const ROM_PATH: &str = "roms/drmario.gb";
 
 const SCREEN_SCALE: i32 = 3;
 
@@ -30,7 +30,6 @@ fn clear_log_file() -> std::io::Result<()> {
 }
 
 fn main() -> Result<(), String> {
-    // clear_log_file().unwrap();
 
     let mut emulator = Emulator::new(SCREEN_SCALE, ROM_PATH, true)?;
     emulator.debug_run(40e9 as u64);

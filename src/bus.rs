@@ -43,7 +43,13 @@ impl Bus {
     /// Steps through APU, PPU and Timer, and updates interrupt flag(s).
     pub fn step(&mut self, cycles: u8) {
         self.ppu.step(cycles);
-        self.apu.step(cycles);
+
+        let old_div = self.timer.div;
+        if self.timer.step(cycles) {
+            self.request_interrupt(Interrupt::Timer)
+        }
+
+        self.apu.step(cycles as u32, old_div & 0x10 != 0 && self.timer.div & 0x10 == 0);
 
         if self.ppu.entered_vblank {
             self.request_interrupt(Interrupt::VBlank);
@@ -53,9 +59,6 @@ impl Bus {
         }
         if self.joypad.interrupt {
             self.request_interrupt(Interrupt::Joypad)
-        }
-        if self.timer.step(cycles) {
-            self.request_interrupt(Interrupt::Timer)
         }
     }
 
@@ -77,7 +80,7 @@ impl Bus {
             0xFF04..=0xFF07 => self.timer.read_io(addr),
             0xFF0F          => self.interrupt_flag,
             0xFF10..=0xFF26 => self.apu.read_io(addr),
-            0xFF30..=0xFF3F => self.apu.read_wave(addr),
+            0xFF30..=0xFF3F => self.apu.read_io(addr),
             0xFF40..=0xFF4B => self.ppu.read_io(addr),
             0xFF50          => self.memory.read_bank(),
         
@@ -106,7 +109,7 @@ impl Bus {
             0xFF04..=0xFF07 => self.timer.write_io(addr, byte),
             0xFF0F          => self.interrupt_flag = 0xE0 | byte,
             0xFF10..=0xFF26 => self.apu.write_io(addr, byte),
-            0xFF30..=0xFF3F => self.apu.write_wave(addr, byte),
+            0xFF30..=0xFF3F => self.apu.write_io(addr, byte),
             0xFF40..=0xFF4B => self.ppu_write(addr, byte),
             0xFF50          => self.memory.write_bank(byte),
 

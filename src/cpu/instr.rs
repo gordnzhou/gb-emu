@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
-use super::{Cpu, Interrupt::*};
-use crate::cpu::Interrupt;
+use super::{Cpu, Interrupt::*, Interrupt};
 
 use std::fs::OpenOptions;
 use std::io::prelude::*;
