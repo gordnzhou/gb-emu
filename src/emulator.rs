@@ -39,6 +39,7 @@ pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
 pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
 
 pub const SAMPLING_RATE_HZ: u32 = 48000;
+pub const AUDIO_SAMPLES: usize = 2048;
 
 
 use std::time::{Duration, Instant};
@@ -47,7 +48,7 @@ pub struct Emulator {
     event_pump: EventPump,
     screen_scale: i32,
     canvas: Canvas<Window>,
-    audio_device: AudioQueue<i16>,
+    audio_device: AudioQueue<f32>,
     key_status: u8,
     cpu: Cpu,
 }
@@ -63,12 +64,13 @@ impl Emulator {
 
         let desired_spec = AudioSpecDesired {
             freq: Some(SAMPLING_RATE_HZ as i32),
-            channels: Some(2),
-            samples: None,
+            channels: Some(1),
+            samples: Some(AUDIO_SAMPLES as u16),
         };
 
         let audio_subsystem = sdl_context.audio()?;
-        let audio_device = audio_subsystem.open_queue::<i16, _>(None, &desired_spec)?;
+        let audio_device = audio_subsystem.open_queue::<f32, _>(None, &desired_spec)?;
+        audio_device.resume();
 
         let mut cpu = if !skip_bootrom {
             let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0);
@@ -143,11 +145,10 @@ impl Emulator {
                 let cycles = self.cpu.step();
                 cpu_duration_ns = (4.0 * cycles as f32 * DOT_DURATION_NS) as u64;
                 dur_ns += cpu_duration_ns;
-
-                self.play_audio();
-                self.draw_window();
+                // self.draw_window();
             }
 
+            self.play_audio();
             match self.get_events() {
                 Ok(_) => self.cpu.bus.joypad.step(self.key_status),
                 Err(e) => panic!("{}", e)
@@ -156,11 +157,9 @@ impl Emulator {
     }
 
     fn play_audio(&mut self) {
-        if self.cpu.bus.apu.audio_buffer.len() as u32 >= 2 * CYCLE_HZ / SAMPLING_RATE_HZ {
-            // println!("{:?}", self.cpu.bus.apu.audio_buffer);
+        if self.cpu.bus.apu.audio_buffer.len() >= AUDIO_SAMPLES {
             self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
-            self.audio_device.resume(); 
-            self.cpu.bus.apu.audio_buffer.clear();   
+            self.cpu.bus.apu.audio_buffer.clear();
         }
     }
 

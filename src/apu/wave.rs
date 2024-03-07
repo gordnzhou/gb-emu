@@ -3,6 +3,7 @@ use crate::timer::Stepper;
 const WAVE_RAM_SIZE: usize = 16;
 
 const MAX_LENGTH: u32 = 256;
+const MAX_PERIOD: u32 = 2048;
 
 pub struct Wave {
     nr30: u8,
@@ -12,10 +13,12 @@ pub struct Wave {
     nr34: u8,
     wave_ram: [u8 ; 2 * WAVE_RAM_SIZE],
 
-    silenced: bool,
+    dac_on: bool,
+    channel_on: bool,
     length_stepper: Stepper,
-    freq_stepper: Stepper,
     sample_index: usize,
+    freq_counter: u32,
+    freq_period: u32,
 }
 
 impl Wave {
@@ -28,40 +31,38 @@ impl Wave {
             nr34: 0,
             wave_ram: [0; 2 * WAVE_RAM_SIZE],
 
-            silenced: true,
+            dac_on: true,
+            channel_on: true,
             length_stepper: Stepper::new(0, MAX_LENGTH),
-            freq_stepper: Stepper::new(0, 2048),
             sample_index: 0,
+            freq_counter: 0,
+            freq_period: MAX_PERIOD,
         }
     }
 
-    /// Returns exactly (2 * cycles) samples.
+    /// Returns exactly (4 * cycles) samples.
     pub fn step(&mut self, cycles: u32, length_steps: u32) -> Vec<u8> {
-        if self.nr34 & 0x40 != 0 && !self.silenced {
+        if self.nr34 & 0x40 != 0 && self.channel_on {
             let length_over = self.length_stepper.step(length_steps);
-
+            
             if length_over != 0 {
-                self.length_stepper.set_period(MAX_LENGTH);
                 self.length_stepper.set_steps_so_far(self.nr31 as u32);
-                self.silenced = true;
+                self.channel_on = false;
             }
         }
 
         let mut res = Vec::new();
 
-        let cur_steps = self.freq_stepper.get_steps_so_far();
-        self.freq_stepper.step(cycles);
-        
-        for i in 0..2*cycles {
-            if (cur_steps + i) % self.freq_stepper.get_period() == 0 {
+        for _ in 0..4*cycles {
+            if self.freq_counter % self.freq_period == 0 {
+                self.freq_counter = 0;
                 self.sample_index = (self.sample_index + 1) % WAVE_RAM_SIZE;
             }
+            self.freq_counter += 1;
 
-            let mut sample = if self.silenced {
-                0
-            } else {
+            let mut sample = if self.channel_on {
                 self.wave_ram[self.sample_index]
-            };
+            } else { 0 };
 
             sample >>= self.output_level();
 
@@ -69,14 +70,6 @@ impl Wave {
         }
 
         res
-    }
-
-    pub fn dac_on(&self) -> bool {
-        self.nr30 & 0x80 != 0
-    }
-
-    fn period_value(&self) -> u32 {
-        (self.nr34 as u32 & 0x7) << 8 | self.nr33 as u32
     }
 
     fn output_level(&self) -> u8 {
@@ -106,8 +99,8 @@ impl Wave {
 
     pub fn write(&mut self, addr: usize, byte: u8) {
         match addr {
-            0xFF1A => self.nr30 = byte,
-            0xFF1B => self.write_nr31(byte),
+            0xFF1A => self.write_nr30(byte),
+            0xFF1B => self.nr31 = byte,
             0xFF1C => self.nr32 = byte,
             0xFF1D => self.nr33 = byte,
             0xFF1E => self.write_nr34(byte),
@@ -120,20 +113,38 @@ impl Wave {
         };
     }
 
-    fn write_nr31(&mut self, byte: u8) {
-        self.nr31 = byte;
+    pub fn dac_on(&self) -> bool {
+        self.dac_on
+    }
+
+    pub fn channel_on(&self) -> bool {
+        self.channel_on
+    }
+
+    fn write_nr30(&mut self, byte: u8) {
+        self.nr30 = byte;
+
+        if self.nr30 & 0x80 == 0 {
+            self.dac_on = false;
+            self.channel_on = false;
+        } else {
+            self.dac_on = true;
+        }
     }
 
     fn write_nr34(&mut self, byte: u8) {
-        if self.nr34 & 0x80 != 0 {
-            self.sample_index = 0;
+        if self.nr34 & 0x80 != 0 && self.dac_on {
+            self.channel_on = true;
+            self.freq_period = (2048 - self.period_value()) * 4;
             if self.length_stepper.get_steps_so_far() == MAX_LENGTH {
                 self.length_stepper.set_steps_so_far(0);
-                self.silenced = false;
             }
-            self.freq_stepper.set_period((2048 - self.period_value()) >> 1);
         }
 
         self.nr34 = byte
+    }
+
+    fn period_value(&self) -> u32 {
+        (self.nr34 as u32 & 0x7) << 8 | self.nr33 as u32
     }
 }

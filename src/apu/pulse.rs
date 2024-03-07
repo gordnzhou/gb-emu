@@ -17,6 +17,10 @@ impl Pulse1{
         }
     }
 
+    pub fn dac_on(&self) -> bool {
+        false
+    }
+
     pub fn read(&self, addr: usize) -> u8 {
         match addr {
             0xFF10 => self.nr10 | 0x80,
@@ -55,6 +59,10 @@ impl Pulse2 {
             nr23: 0,
             nr24: 0,
         }
+    }
+
+    pub fn dac_on(&self) -> bool {
+        false
     }
 
     pub fn read(&self, addr: usize) -> u8 {

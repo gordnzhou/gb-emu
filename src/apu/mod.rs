@@ -2,13 +2,15 @@ mod pulse;
 mod wave;
 mod noise;
 
+use crate::emulator::{CYCLE_HZ, SAMPLING_RATE_HZ};
 use crate::timer::Stepper;
 use self::pulse::{Pulse1, Pulse2};
 use self::wave::Wave;
 use self::noise::Noise;
 
 pub struct Apu {
-    pub audio_buffer: Vec<i16>,
+    pub audio_buffer: Vec<f32>,
+    sample_gather: u32,
     nr52: u8,
     nr51: u8,
     nr50: u8,
@@ -18,6 +20,7 @@ pub struct Apu {
     wave: Wave,
     noise: Noise,
 
+    apu_on: bool,
     length_stepper: Stepper,
     envelope_stepper: Stepper,
     sweep_stepper: Stepper,
@@ -28,6 +31,7 @@ impl Apu {
         Apu { 
             // Audio samples are in the form: [L1, R1, L2, R2, ...] for L and R channels
             audio_buffer: Vec::new(),
+            sample_gather: 0,
             nr52: 0,
             nr51: 0,
             nr50: 0,
@@ -37,6 +41,7 @@ impl Apu {
             wave: Wave::new(),
             noise: Noise::new(),
 
+            apu_on: true,
             length_stepper: Stepper::new(0, 2),
             envelope_stepper: Stepper::new(0, 8),
             sweep_stepper: Stepper::new(0, 4),
@@ -44,24 +49,32 @@ impl Apu {
     }
 
     pub fn step(&mut self, cycles: u32, div_apu_tick: bool) {
+        if !self.apu_on {
+            return;
+        }
+
         let length_steps = self.length_stepper.step(div_apu_tick as u32);
         let _envelope_steps = self.envelope_stepper.step(div_apu_tick as u32);
         let _sweep_steps = self.sweep_stepper.step(div_apu_tick as u32);
 
         let wave_buffer = self.wave.step(cycles, length_steps);
         
-        // adds (2 * cycles) samples to frame buffer
+        // adds (4 * cycles) samples to frame buffer
         for sample in wave_buffer {
             let left_sample = if self.wave.dac_on() { 
-                sample as i16 * 1000
+                -1.0 + (sample as f32 / 15.0) * 2.0
             } else { 
-                0 
-            };
+                0.0
+            }.clamp(-1.0, 1.0);
 
             let right_sample = left_sample;
 
-            self.audio_buffer.push(left_sample);
-            self.audio_buffer.push(right_sample);
+            if self.sample_gather % (4 * CYCLE_HZ / SAMPLING_RATE_HZ) == 0 {
+                self.sample_gather = 0;
+                self.audio_buffer.push(left_sample);
+                self.audio_buffer.push(right_sample);
+            }
+            self.sample_gather += 1;
         }
     }
 
@@ -73,13 +86,17 @@ impl Apu {
             0xFF20..=0xFF23 => self.noise.read(addr),
             0xFF24 => self.nr50,
             0xFF25 => self.nr51,
-            0xFF26 => self.nr52 | 0x70,
+            0xFF26 => self.read_nr52(),
             0xFF30..=0xFF3F => self.wave.read(addr),
             _ => 0xFF
         }
     }
 
     pub fn write_io(&mut self, addr: usize, byte: u8) {
+        if !self.apu_on {
+            return;
+        }
+
         match addr {
             0xFF10..=0xFF14 => self.pulse1.write(addr, byte),
             0xFF16..=0xFF19 => self.pulse2.write(addr, byte),
@@ -87,9 +104,44 @@ impl Apu {
             0xFF20..=0xFF23 => self.noise.write(addr, byte),
             0xFF24 => self.nr50 = byte,
             0xFF25 => self.nr51 = byte,
-            0xFF26 => self.nr52 = (byte & 0x80) | (self.nr52 & 0x7F),
+            0xFF26 => self.write_nr52(byte),
             0xFF30..=0xFF3F => self.wave.write(addr, byte),
             _ => {}
         };
     }
+
+    fn read_nr52(&self) -> u8 {
+        let mut res = self.nr52 & 0x80;
+        // TODO: should be if their CHANNEL IS ON, not their DAC
+        res |=  self.pulse1.dac_on() as u8;
+        res |= (self.pulse2.dac_on() as u8) << 1;
+        res |= (self.wave.channel_on()   as u8) << 2;
+        res |= (self.noise.dac_on()  as u8) << 3;
+        res | 0x70
+    }
+
+    fn write_nr52(&mut self, byte: u8) {
+        if (byte & 0x80) ^ (self.nr52 & 0x80) != 0 {
+            if byte & 0x80 == 0 {
+                self.turn_off_apu();
+            } else {
+                self.turn_on_apu();
+            }
+        }
+
+        self.nr52 = (byte & 0x80) | (self.nr52 & 0x7F);
+    }
+
+    fn turn_on_apu(&mut self) {
+        self.apu_on = true;
+    }
+
+    fn turn_off_apu(&mut self) {
+        self.apu_on = false;
+        // self.pulse1 = Pulse1::new();
+        // self.pulse2 = Pulse2::new();
+        // self.wave = Wave::new();
+        // self.noise = Noise::new();
+    }
+
 }

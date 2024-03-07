@@ -17,6 +17,10 @@ impl Noise {
         }
     }
 
+    pub fn dac_on(&self) -> bool {
+        false
+    }
+
     pub fn read(&self, addr: usize) -> u8 {
         match addr {
             0xFF20 => self.nr41 | 0xFF,
