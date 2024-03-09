@@ -35,10 +35,11 @@ pub const LCD_HEIGHT: usize = 144;
 pub const DOT_HZ: u32 = 1 << 22;
 pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
 
-// 1 dot = 2^22 Hz = 1/4 M-cycle = 238.4 ns
+// 1 dot = 2^22 Hz = 1/4 M-cycle = 238.4... ns
 pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
+const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
 
-pub const SAMPLING_RATE_HZ: u32 = 48000;
+pub const SAMPLING_RATE_HZ: u32 = 44100;
 pub const AUDIO_SAMPLES: usize = 2048;
 
 
@@ -64,12 +65,12 @@ impl Emulator {
 
         let desired_spec = AudioSpecDesired {
             freq: Some(SAMPLING_RATE_HZ as i32),
-            channels: Some(1),
+            channels: Some(2),
             samples: Some(AUDIO_SAMPLES as u16),
         };
 
         let audio_subsystem = sdl_context.audio()?;
-        let audio_device = audio_subsystem.open_queue::<f32, _>(None, &desired_spec)?;
+        let audio_device = audio_subsystem.open_queue(None, &desired_spec)?;
         audio_device.resume();
 
         let mut cpu = if !skip_bootrom {
@@ -118,7 +119,7 @@ impl Emulator {
                 last_instr = Instant::now();
                 let cycles = self.cpu.step();
 
-                cpu_duration_ns = 4.0 * cycles as f32 * DOT_DURATION_NS;
+                cpu_duration_ns = cycles as f32 * (DOT_DURATION_NS * 4.0);
 
                 self.play_audio();
                 self.draw_window();
@@ -140,37 +141,35 @@ impl Emulator {
 
         while dur_ns < total_dur_ns {
             if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
+                // println!("{} {}", last_instr.elapsed().as_nanos(), cpu_duration_ns);
                 last_instr = Instant::now();
 
                 let cycles = self.cpu.step();
-                cpu_duration_ns = (4.0 * cycles as f32 * DOT_DURATION_NS) as u64;
+                cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
                 dur_ns += cpu_duration_ns;
-                // self.draw_window();
-            }
-
-            self.play_audio();
-            match self.get_events() {
-                Ok(_) => self.cpu.bus.joypad.step(self.key_status),
-                Err(e) => panic!("{}", e)
+                
+                self.cpu.bus.joypad.step(self.key_status);
+                self.play_audio();
+                self.draw_window();
             }
         } 
     }
 
     fn play_audio(&mut self) {
-        if self.cpu.bus.apu.audio_buffer.len() >= AUDIO_SAMPLES {
+        if self.cpu.bus.apu.buffer_index >= AUDIO_SAMPLES {
             self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
-            self.cpu.bus.apu.audio_buffer.clear();
+            self.cpu.bus.apu.buffer_index = 0;
         }
     }
 
-    fn get_events(&mut self) -> Result<(), &str> {
+    fn get_events(&mut self) -> Result<(), &str> { 
         for event in self.event_pump.poll_iter() {
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     return Err("User Exited");
                 },
-                Event::KeyDown { keycode: Some(key), ..} => {        
+                Event::KeyDown { keycode: Some(key), ..} => {   
                     for i in 0..8 {
                         if KEYMAPPINGS[i] == key {
                             self.key_status &= !(1 << (7 - i));
@@ -195,6 +194,11 @@ impl Emulator {
     fn draw_window(&mut self) {
         if !self.cpu.bus.ppu.entered_vblank {
             return;
+        }
+
+        match self.get_events() {
+            Ok(_) => self.cpu.bus.joypad.step(self.key_status),
+            Err(e) => panic!("{}", e)
         }
 
         let pixel_size = self.screen_scale as u32;

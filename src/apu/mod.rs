@@ -2,14 +2,15 @@ mod pulse;
 mod wave;
 mod noise;
 
-use crate::emulator::{CYCLE_HZ, SAMPLING_RATE_HZ};
+use crate::emulator::{CYCLE_HZ, SAMPLING_RATE_HZ, AUDIO_SAMPLES};
 use crate::timer::Stepper;
 use self::pulse::{Pulse1, Pulse2};
 use self::wave::Wave;
 use self::noise::Noise;
 
 pub struct Apu {
-    pub audio_buffer: Vec<f32>,
+    pub audio_buffer: [f32; AUDIO_SAMPLES],
+    pub buffer_index: usize,
     sample_gather: u32,
     nr52: u8,
     nr51: u8,
@@ -30,7 +31,8 @@ impl Apu {
     pub fn new() -> Self {
         Apu { 
             // Audio samples are in the form: [L1, R1, L2, R2, ...] for L and R channels
-            audio_buffer: Vec::new(),
+            audio_buffer: [0.0; AUDIO_SAMPLES],
+            buffer_index: 0,
             sample_gather: 0,
             nr52: 0,
             nr51: 0,
@@ -59,20 +61,22 @@ impl Apu {
 
         let wave_buffer = self.wave.step(cycles, length_steps);
         
-        // adds (4 * cycles) samples to frame buffer
         for sample in wave_buffer {
-            let left_sample = if self.wave.dac_on() { 
-                -1.0 + (sample as f32 / 15.0) * 2.0
-            } else { 
-                0.0
-            }.clamp(-1.0, 1.0);
-
-            let right_sample = left_sample;
-
-            if self.sample_gather % (4 * CYCLE_HZ / SAMPLING_RATE_HZ) == 0 {
+            if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
                 self.sample_gather = 0;
-                self.audio_buffer.push(left_sample);
-                self.audio_buffer.push(right_sample);
+
+                let sample = if self.wave.dac_on() { 
+                    -1.0 + (sample as f32 / 15.0) * 2.0
+                } else { 
+                    0.0
+                }.clamp(-1.0, 1.0);
+                
+                let left_sample = sample;
+                let right_sample = sample;
+
+                self.audio_buffer[self.buffer_index] = left_sample;
+                self.audio_buffer[self.buffer_index] = right_sample;
+                self.buffer_index += 2;
             }
             self.sample_gather += 1;
         }
@@ -115,7 +119,7 @@ impl Apu {
         // TODO: should be if their CHANNEL IS ON, not their DAC
         res |=  self.pulse1.dac_on() as u8;
         res |= (self.pulse2.dac_on() as u8) << 1;
-        res |= (self.wave.channel_on()   as u8) << 2;
+        res |= (self.wave.channel_on() as u8) << 2;
         res |= (self.noise.dac_on()  as u8) << 3;
         res | 0x70
     }
@@ -140,7 +144,7 @@ impl Apu {
         self.apu_on = false;
         // self.pulse1 = Pulse1::new();
         // self.pulse2 = Pulse2::new();
-        // self.wave = Wave::new();
+        self.wave = Wave::new();
         // self.noise = Noise::new();
     }
 

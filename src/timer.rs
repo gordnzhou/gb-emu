@@ -134,7 +134,11 @@ impl Stepper {
         self.period = period;
     }
 
-    pub fn get_steps_so_far(&self) -> u32 {
-        self.steps_so_far
-    }
+    // pub fn get_steps_so_far(&self) -> u32 {
+    //     self.steps_so_far
+    // }
+
+    // pub fn get_period(&self) -> u32 {
+    //     self.period
+    // }
 }

@@ -26,7 +26,7 @@ impl Joypad {
     /// Update joypad register based on status, checking for any interrupts.
     /// status is in order of: START (msb), SELECT, B, A, DOWN, UP, LEFT, RIGHT (lsb).
     /// FALSE/0 = pressed and TRUE/1 = released.
-    pub fn step(&mut self, status: u8) {   
+    pub fn step(&mut self, status: u8) {
         self.interrupt = false; 
 
         let upper_nibble = self.joypad & 0xF0;

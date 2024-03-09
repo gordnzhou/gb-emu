@@ -162,7 +162,7 @@ impl Ppu {
             2 => {
                 // OAM Search -> Drawing
                 self.obj_buffer_index = 0;
-                self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
+                // self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
                 self.wx_cond = false;
                 self.mode_3_dots = self.calc_mode_3_dots();
                 3
@@ -204,7 +204,7 @@ impl Ppu {
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
                 self.wx_cond |= self.wx as usize == self.cur_pixel_x + 7;
 
-                // future todo: implement BG and OAM FIFO 
+                // future TODO: implement BG and OAM FIFO 
                 let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize);
 
                 self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
