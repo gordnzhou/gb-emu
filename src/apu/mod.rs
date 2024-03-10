@@ -62,7 +62,7 @@ impl Apu {
         let wave_buffer = self.wave.step(cycles, length_steps);
         
         for sample in wave_buffer {
-            if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
+            if self.sample_gather == (2 * CYCLE_HZ / SAMPLING_RATE_HZ) {
                 self.sample_gather = 0;
 
                 let sample = if self.wave.dac_on() { 
@@ -76,7 +76,7 @@ impl Apu {
 
                 self.audio_buffer[self.buffer_index] = left_sample;
                 self.audio_buffer[self.buffer_index] = right_sample;
-                self.buffer_index += 2;
+                self.buffer_index += 1;
             }
             self.sample_gather += 1;
         }

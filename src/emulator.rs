@@ -39,9 +39,8 @@ pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
 pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
 const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
 
-pub const SAMPLING_RATE_HZ: u32 = 44100;
-pub const AUDIO_SAMPLES: usize = 2048;
-
+pub const SAMPLING_RATE_HZ: u32 = 48000;
+pub const AUDIO_SAMPLES: usize = 4096;
 
 use std::time::{Duration, Instant};
 
@@ -66,7 +65,7 @@ impl Emulator {
         let desired_spec = AudioSpecDesired {
             freq: Some(SAMPLING_RATE_HZ as i32),
             channels: Some(2),
-            samples: Some(AUDIO_SAMPLES as u16),
+            samples: Some(AUDIO_SAMPLES as u16 ),
         };
 
         let audio_subsystem = sdl_context.audio()?;
@@ -141,22 +140,21 @@ impl Emulator {
 
         while dur_ns < total_dur_ns {
             if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
-                // println!("{} {}", last_instr.elapsed().as_nanos(), cpu_duration_ns);
                 last_instr = Instant::now();
-
                 let cycles = self.cpu.step();
-                cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
-                dur_ns += cpu_duration_ns;
-                
                 self.cpu.bus.joypad.step(self.key_status);
                 self.play_audio();
                 self.draw_window();
+
+                cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
+                dur_ns += cpu_duration_ns;
             }
         } 
     }
 
     fn play_audio(&mut self) {
         if self.cpu.bus.apu.buffer_index >= AUDIO_SAMPLES {
+            println!("{} {}", self.audio_device.size(), self.cpu.bus.apu.buffer_index);
             self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
             self.cpu.bus.apu.buffer_index = 0;
         }

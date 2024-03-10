@@ -31,8 +31,8 @@ impl Wave {
             nr34: 0,
             wave_ram: [0; WAVE_RAM_SIZE],
 
-            dac_on: true,
-            channel_on: true,
+            dac_on: false,
+            channel_on: false,
             length_stepper: Stepper::new(0, MAX_LENGTH),
             sample_index: 0,
             freq_counter: 0,
@@ -52,7 +52,8 @@ impl Wave {
 
         let mut res = Vec::new();
 
-        for _ in 0..cycles {
+        self.freq_period = self.period_value();
+        for _ in 0..(4 * cycles) {
             if !self.channel_on {
                 res.push(0);
                 continue;
@@ -138,8 +139,7 @@ impl Wave {
     fn write_nr34(&mut self, byte: u8) {
         if byte & 0x80 != 0 {
             self.channel_on = true;
-            self.freq_period = (2048 - self.period_value()) / 2;
-            println!("trigger {}", self.freq_period);
+            // println!("trigger {}", self.period_value());
             // if self.length_stepper.get_steps_so_far() == MAX_LENGTH {
             //     self.length_stepper.set_steps_so_far(0);
             // }
@@ -149,6 +149,6 @@ impl Wave {
     }
 
     fn period_value(&self) -> u32 {
-        (self.nr34 as u32 & 7) << 8 | self.nr33 as u32
+        (2048 - ((self.nr34 as u32 & 7) << 8 | self.nr33 as u32)) * 2
     }
 }
