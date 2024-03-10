@@ -16,6 +16,13 @@ const MODE_1_DOTS: u32 = SCAN_LINE_DOTS * 10;
 const MODE_2_DOTS: u32 = 80;
 const MODE_3_MIN_DOTS: u32 = 172;
 
+pub const COLORS: [[u8; 4]; 4] = [
+    [0x0F, 0xBC, 0x9B, 0xFF], // #9BBC0F => white
+    [0x0F, 0xAC, 0x8B, 0xFF], // #8BAC0F => light grey
+    [0x30, 0x62, 0x30, 0xFF], // #306230 => dark grey
+    [0x0F, 0x38, 0x0F, 0xFF], // #0F380F => black
+];
+
 pub struct Ppu {
     tile_data: [[u8; TILE_SIZE]; TILE_ENTRIES],
     tile_map0: [u8; TILE_MAP_SIZE],
@@ -36,7 +43,7 @@ pub struct Ppu {
 
     // frame buffer representing the LCD screen that will be
     // displayed on canvas at 60 Hz 
-    pub frame_buffer: [[u8; LCD_WIDTH]; LCD_HEIGHT],
+    pub frame_buffer: [u8; LCD_WIDTH * LCD_HEIGHT * 4],
     pub stat_triggered: bool,
     stat_line: bool,
     mode: u8,
@@ -75,7 +82,7 @@ impl Ppu {
             wy: 0,
             wx: 0,
 
-            frame_buffer: [[0; LCD_WIDTH]; LCD_HEIGHT],
+            frame_buffer: [0; 4 * LCD_WIDTH * LCD_HEIGHT],
             stat_triggered: false,
             stat_line: false,
 
@@ -205,9 +212,13 @@ impl Ppu {
                 self.wx_cond |= self.wx as usize == self.cur_pixel_x + 7;
 
                 // future TODO: implement BG and OAM FIFO 
-                let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize);
-
-                self.frame_buffer[self.ly as usize][self.cur_pixel_x] = colour;
+                let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize;
+                
+                for i in 0..=3 {
+                    self.frame_buffer[usize::from(self.ly as usize) * 4 * LCD_WIDTH 
+                        + usize::from(self.cur_pixel_x) * 4 
+                        + i] = COLORS[colour][i];
+                }
                 
                 self.cur_pixel_x += 1;
                 pixels_left -= 1;
@@ -284,9 +295,7 @@ impl Ppu {
             if id != 0 { 
                 let palette = if attributes & 0x10 == 0 { self.obp0 } else { self.obp1 };
 
-                if attributes & 0x80 == 0 {
-                    colour = Ppu::apply_palette(&id, &palette);
-                } else if colour == 0 {
+                if attributes & 0x80 == 0 || colour == 0 {
                     colour = Ppu::apply_palette(&id, &palette);
                 }
 
@@ -397,7 +406,7 @@ impl Ppu {
     }
 
     fn reset_lcd(&mut self) {
-        self.frame_buffer = [[0; LCD_WIDTH]; LCD_HEIGHT];
+        self.frame_buffer = [0; 4 * LCD_WIDTH * LCD_HEIGHT];
     }
 
     pub fn read_vram(&self, addr: usize) -> u8 {
@@ -536,7 +545,7 @@ mod tests {
         
         for y in 0..LCD_HEIGHT {
             for x in 0..LCD_WIDTH {
-                sum = sum.wrapping_add((cpu.bus.ppu.frame_buffer[y][x] as u32).wrapping_mul((x + LCD_WIDTH * y) as u32));
+                sum = sum.wrapping_add((cpu.bus.ppu.frame_buffer[x + LCD_WIDTH * y] as u32).wrapping_mul((x + LCD_WIDTH * y) as u32));
             }
         }
 

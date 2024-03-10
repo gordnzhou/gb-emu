@@ -1,7 +1,7 @@
 use sdl2::{Sdl, VideoSubsystem};
 use sdl2::video::Window;
-use sdl2::pixels::Color;
-use sdl2::render::Canvas;
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::render::{Canvas, Texture};
 use sdl2::rect::Rect;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -22,13 +22,6 @@ pub const KEYMAPPINGS: [Keycode; 8] = [
     Keycode::D,
 ];
 
-pub const COLOURS: [Color; 4] = [
-    Color::RGB(155, 188, 15), // 00 -> White
-    Color::RGB(139, 172, 15), // 01 -> Light Gray
-    Color::RGB(48, 98, 48),   // 10 -> Dark Gray
-    Color::RGB(15, 56, 15),   // 11 -> Black
-];
-
 pub const LCD_WIDTH: usize= 160;
 pub const LCD_HEIGHT: usize = 144;
 
@@ -40,7 +33,7 @@ pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
 const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
 
 pub const SAMPLING_RATE_HZ: u32 = 48000;
-pub const AUDIO_SAMPLES: usize = 4096;
+pub const AUDIO_SAMPLES: usize = 2048;
 
 use std::time::{Duration, Instant};
 
@@ -56,9 +49,13 @@ pub struct Emulator {
 impl Emulator {
     pub fn new(screen_scale: i32, rom_path: &str, skip_bootrom: bool) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
+
         let video_subsystem = sdl_context.video()?;
         let window = Emulator::build_window(video_subsystem, screen_scale as u32)?;
-        let canvas: Canvas<Window> = window.into_canvas().build().map_err(|e| e.to_string())?;
+        let canvas: Canvas<Window> = window
+            .into_canvas()
+            .build()
+            .map_err(|e| e.to_string())?;
 
         let event_pump = sdl_context.event_pump()?;
 
@@ -121,7 +118,7 @@ impl Emulator {
                 cpu_duration_ns = cycles as f32 * (DOT_DURATION_NS * 4.0);
 
                 self.play_audio();
-                self.draw_window();
+                // self.draw_window();
             }
 
             match self.get_events() {
@@ -138,13 +135,23 @@ impl Emulator {
         let mut last_instr = Instant::now();
         let mut cpu_duration_ns: u64 = 0;
 
+        let creator = self.canvas.texture_creator();
+        let mut texture = creator
+            .create_texture_streaming(PixelFormatEnum::ARGB8888, LCD_WIDTH as u32, LCD_HEIGHT as u32)
+            .map_err(|e| e.to_string())
+            .unwrap();
+
+        let screen_width = LCD_WIDTH as u32 * self.screen_scale as u32;
+        let screen_height = LCD_HEIGHT as u32 * self.screen_scale as u32;
+        let rect = Rect::new(0, 0, screen_width, screen_height);
+
         while dur_ns < total_dur_ns {
             if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
                 last_instr = Instant::now();
                 let cycles = self.cpu.step();
                 self.cpu.bus.joypad.step(self.key_status);
                 self.play_audio();
-                self.draw_window();
+                self.draw_window(&mut texture, rect);
 
                 cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
                 dur_ns += cpu_duration_ns;
@@ -154,7 +161,6 @@ impl Emulator {
 
     fn play_audio(&mut self) {
         if self.cpu.bus.apu.buffer_index >= AUDIO_SAMPLES {
-            println!("{} {}", self.audio_device.size(), self.cpu.bus.apu.buffer_index);
             self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
             self.cpu.bus.apu.buffer_index = 0;
         }
@@ -189,7 +195,7 @@ impl Emulator {
     }
 
     /// Renders frame buffer to SDL2 canvas (60 times per second).
-    fn draw_window(&mut self) {
+    fn draw_window(&mut self, texture: &mut Texture, rect: Rect) {
         if !self.cpu.bus.ppu.entered_vblank {
             return;
         }
@@ -199,19 +205,11 @@ impl Emulator {
             Err(e) => panic!("{}", e)
         }
 
-        let pixel_size = self.screen_scale as u32;
+        texture
+            .update(None, &self.cpu.bus.ppu.frame_buffer, 4 * LCD_WIDTH)
+            .expect("texture update failed");
 
-        for i in 0..LCD_HEIGHT {
-            for j in 0..LCD_WIDTH {
-                let x = j as i32 * self.screen_scale;
-                let y = i as i32 * self.screen_scale;
-                let colour = COLOURS[self.cpu.bus.ppu.frame_buffer[i][j] as usize];
-
-                self.canvas.set_draw_color(colour);
-                let _ = self.canvas.fill_rect(Rect::new(x, y, pixel_size, pixel_size));
-            }
-        }
-
+        self.canvas.copy(&texture, None, rect).unwrap();
         self.canvas.present();
     }
 }
