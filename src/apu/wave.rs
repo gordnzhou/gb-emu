@@ -1,5 +1,7 @@
 use crate::timer::Stepper;
 
+use super::Apu;
+
 const WAVE_RAM_SIZE: usize = 32;
 
 const MAX_LENGTH: u32 = 256;
@@ -40,7 +42,29 @@ impl Wave {
         }
     }
 
-    pub fn step(&mut self, cycles: u32, length_steps: u32) -> Vec<u8> {
+    pub fn make_sample(&mut self) -> f32 {
+        if !self.channel_on || !self.dac_on {
+            return 0.0;
+        }
+
+        if self.freq_counter >= self.freq_period {
+            self.freq_counter = 0;
+            self.sample_index = (self.sample_index + 1) % WAVE_RAM_SIZE;
+        }
+        self.freq_counter += 1;
+
+        let volume = match (self.nr32 & 0x60) >> 5 {
+            0 => 4,
+            1 => 0,
+            2 => 1,
+            3 => 2,
+            _ => unreachable!()
+        };
+
+        Apu::to_analog(self.wave_ram[self.sample_index] >> volume)
+    }
+
+    pub fn step(&mut self, length_steps: u32) {
         if self.nr34 & 0x40 != 0 && length_steps > 0 {
             let length_over = self.length_stepper.step(length_steps);
 
@@ -50,35 +74,7 @@ impl Wave {
             }
         } 
 
-        let mut res = Vec::new();
-
         self.freq_period = self.period_value();
-        for _ in 0..(4 * cycles) {
-            if !self.channel_on {
-                res.push(0);
-                continue;
-            }
-
-            if self.freq_counter >= self.freq_period {
-                self.freq_counter = 0;
-                self.sample_index = (self.sample_index + 1) % WAVE_RAM_SIZE;
-            }
-            self.freq_counter += 1;
-
-            res.push(self.wave_ram[self.sample_index] >> self.output_level());
-        }
-
-        res
-    }
-
-    fn output_level(&self) -> u8 {
-        match (self.nr32 & 0x60) >> 5 {
-            0 => 4,
-            1 => 0,
-            2 => 1,
-            3 => 2,
-            _ => unreachable!()
-        }
     }
 
     pub fn read(&self, addr: usize) -> u8 {
@@ -110,10 +106,6 @@ impl Wave {
             }
             _ => unreachable!()
         };
-    }
-
-    pub fn dac_on(&self) -> bool {
-        self.dac_on
     }
 
     pub fn channel_on(&self) -> bool {

@@ -5,6 +5,9 @@ pub struct Noise {
     nr42: u8,
     nr43: u8,
     nr44: u8,
+
+    dac_on: bool,
+    channel_on: bool,
 }
 
 impl Noise {
@@ -14,11 +17,26 @@ impl Noise {
             nr42: 0,
             nr43: 0, 
             nr44: 0,
+
+            dac_on: false,
+            channel_on: false,
         }
     }
 
-    pub fn dac_on(&self) -> bool {
-        false
+    pub fn make_sample(&mut self) -> f32 {
+        if !self.channel_on || !self.dac_on {
+            return 0.0;
+        }
+        
+        0.0
+    }
+
+    pub fn step(&mut self, _length_steps: u32) {
+        // stub
+    }
+
+    pub fn channel_on(&self) -> bool {
+        self.channel_on
     }
 
     pub fn read(&self, addr: usize) -> u8 {

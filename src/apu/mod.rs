@@ -59,27 +59,46 @@ impl Apu {
         let _envelope_steps = self.envelope_stepper.step(div_apu_tick as u32);
         let _sweep_steps = self.sweep_stepper.step(div_apu_tick as u32);
 
-        let wave_buffer = self.wave.step(cycles, length_steps);
+        self.pulse1.step(length_steps);
+        self.pulse2.step(length_steps);
+        self.wave.step(length_steps);
+        self.noise.step(length_steps);
         
-        for sample in wave_buffer {
-            if self.sample_gather == (2 * CYCLE_HZ / SAMPLING_RATE_HZ) {
+        for _ in 0..(4 * cycles) {
+            let pulse1_sample = self.pulse1.make_sample();
+            let pulse2_sample = self.pulse2.make_sample();
+            let wave_sample = self.wave.make_sample();
+            let noise_sample = self.noise.make_sample();
+            
+            if self.sample_gather == (4 * CYCLE_HZ / SAMPLING_RATE_HZ) {
                 self.sample_gather = 0;
 
-                let sample = if self.wave.dac_on() { 
-                    -1.0 + (sample as f32 / 15.0) * 2.0
-                } else { 
-                    0.0
-                }.clamp(-1.0, 1.0);
-                
-                let left_sample = sample;
-                let right_sample = sample;
+                let mut right_sample = 0.0;
+                if self.nr51 & 0x01 != 0 { right_sample += pulse1_sample }
+                if self.nr51 & 0x02 != 0 { right_sample += pulse2_sample }
+                if self.nr51 & 0x04 != 0 { right_sample += wave_sample   }
+                if self.nr51 & 0x08 != 0 { right_sample += noise_sample  }
+                right_sample /= (self.nr51 & 0x0F).count_ones() as f32;
+                right_sample *= (self.nr50 & 7 + 1) as f32 / 8.0;
+
+                let mut left_sample = 0.0;
+                if self.nr51 & 0x10 != 0 { left_sample += pulse1_sample }
+                if self.nr51 & 0x20 != 0 { left_sample += pulse2_sample }
+                if self.nr51 & 0x40 != 0 { left_sample += wave_sample   }
+                if self.nr51 & 0x80 != 0 { left_sample += noise_sample  }
+                left_sample /= (self.nr51 & 0xF0).count_ones() as f32;
+                left_sample *= ((self.nr50 & 0x70) >> 4 + 1) as f32 / 8.0;
 
                 self.audio_buffer[self.buffer_index] = left_sample;
                 self.audio_buffer[self.buffer_index] = right_sample;
-                self.buffer_index += 1;
+                self.buffer_index += 2;
             }
             self.sample_gather += 1;
         }
+    }
+
+    pub fn to_analog(sample: u8) -> f32 {
+        -1.0 + (sample as f32 / 15.0) * 2.0
     }
 
     pub fn read_io(&self, addr: usize) -> u8 {
@@ -116,11 +135,10 @@ impl Apu {
 
     fn read_nr52(&self) -> u8 {
         let mut res = self.nr52 & 0x80;
-        // TODO: should be if their CHANNEL IS ON, not their DAC
-        res |=  self.pulse1.dac_on() as u8;
-        res |= (self.pulse2.dac_on() as u8) << 1;
-        res |= (self.wave.channel_on() as u8) << 2;
-        res |= (self.noise.dac_on()  as u8) << 3;
+        res |= (self.pulse1.channel_on() as u8) << 0;
+        res |= (self.pulse2.channel_on() as u8) << 1;
+        res |= (self.wave  .channel_on() as u8) << 2;
+        res |= (self.noise .channel_on() as u8) << 3;
         res | 0x70
     }
 
