@@ -24,6 +24,8 @@ pub const KEYMAPPINGS: [Keycode; 8] = [
 
 pub const LCD_WIDTH: usize= 160;
 pub const LCD_HEIGHT: usize = 144;
+pub const BYTES_PER_PIXEL: usize = 4;
+pub const LCD_BYTE_WIDTH: usize = BYTES_PER_PIXEL * LCD_WIDTH;
 
 pub const DOT_HZ: u32 = 1 << 22;
 pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
@@ -105,28 +107,27 @@ impl Emulator {
     }
 
     /// Runs the emulator.
-    #[allow(dead_code)]
-    pub fn run(&mut self) {
-        let mut last_instr = Instant::now();
-        let mut cpu_duration_ns: f32 = 0.0;
+    // pub fn run(&mut self) {
+    //     let mut last_instr = Instant::now();
+    //     let mut cpu_duration_ns: f32 = 0.0;
 
-        loop {
-            if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns as u64) {
-                last_instr = Instant::now();
-                let cycles = self.cpu.step();
+    //     loop {
+    //         if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns as u64) {
+    //             last_instr = Instant::now();
+    //             let cycles = self.cpu.step();
 
-                cpu_duration_ns = cycles as f32 * (DOT_DURATION_NS * 4.0);
+    //             cpu_duration_ns = cycles as f32 * (DOT_DURATION_NS * 4.0);
 
-                self.play_audio();
-                // self.draw_window();
-            }
+    //             self.play_audio();
+    //             // self.draw_window();
+    //         }
 
-            match self.get_events() {
-                Ok(_) => self.cpu.bus.joypad.step(self.key_status),
-                Err(e) => panic!("{}", e)
-            }
-        }
-    }
+    //         match self.get_events() {
+    //             Ok(_) => self.cpu.bus.joypad.step(self.key_status),
+    //             Err(e) => panic!("{}", e)
+    //         }
+    //     }
+    // }
 
     /// Runs the emulator for the specified number of nanoseconds.
     pub fn debug_run(&mut self, total_dur_ns: u64) {
@@ -151,7 +152,7 @@ impl Emulator {
                 let cycles = self.cpu.step();
                 self.cpu.bus.joypad.step(self.key_status);
                 self.play_audio();
-                self.draw_window(&mut texture, rect);
+                self.next_frame(&mut texture, rect);
 
                 cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
                 dur_ns += cpu_duration_ns;
@@ -195,7 +196,7 @@ impl Emulator {
     }
 
     /// Renders frame buffer to SDL2 canvas (60 times per second).
-    fn draw_window(&mut self, texture: &mut Texture, rect: Rect) {
+    fn next_frame(&mut self, texture: &mut Texture, rect: Rect) {
         if !self.cpu.bus.ppu.entered_vblank {
             return;
         }
@@ -206,7 +207,7 @@ impl Emulator {
         }
 
         texture
-            .update(None, &self.cpu.bus.ppu.frame_buffer, 4 * LCD_WIDTH)
+            .update(None, &self.cpu.bus.ppu.frame_buffer, LCD_BYTE_WIDTH)
             .expect("texture update failed");
 
         self.canvas.copy(&texture, None, rect).unwrap();

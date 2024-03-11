@@ -1,5 +1,7 @@
 use std::cmp::min;
 
+use crate::emulator::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH};
+
 const TILE_SIZE: usize = 16;
 const TILE_ENTRIES: usize = 384;
 
@@ -82,7 +84,7 @@ impl Ppu {
             wy: 0,
             wx: 0,
 
-            frame_buffer: [0; 4 * LCD_WIDTH * LCD_HEIGHT],
+            frame_buffer: [0; LCD_BYTE_WIDTH * LCD_HEIGHT],
             stat_triggered: false,
             stat_line: false,
 
@@ -169,7 +171,7 @@ impl Ppu {
             2 => {
                 // OAM Search -> Drawing
                 self.obj_buffer_index = 0;
-                // self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
+                self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
                 self.wx_cond = false;
                 self.mode_3_dots = self.calc_mode_3_dots();
                 3
@@ -215,8 +217,8 @@ impl Ppu {
                 let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize;
                 
                 for i in 0..=3 {
-                    self.frame_buffer[usize::from(self.ly as usize) * 4 * LCD_WIDTH 
-                        + usize::from(self.cur_pixel_x) * 4 
+                    self.frame_buffer[usize::from(self.ly as usize) * LCD_BYTE_WIDTH
+                        + usize::from(self.cur_pixel_x) * BYTES_PER_PIXEL
                         + i] = COLORS[colour][i];
                 }
                 
@@ -406,7 +408,7 @@ impl Ppu {
     }
 
     fn reset_lcd(&mut self) {
-        self.frame_buffer = [0; 4 * LCD_WIDTH * LCD_HEIGHT];
+        self.frame_buffer = [0; LCD_BYTE_WIDTH * LCD_HEIGHT];
     }
 
     pub fn read_vram(&self, addr: usize) -> u8 {

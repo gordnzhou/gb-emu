@@ -91,7 +91,6 @@ impl Apu {
                 left_sample /= (self.nr51 & 0xF0).count_ones() as f32;
                 left_sample *= (((self.nr50 >> 4) & 7) + 1) as f32 / 8.0;
 
-                // println!("{} {} {}", left_sample, right_sample, pulse2_sample);
                 self.audio_buffer[self.buffer_index] = left_sample;
                 self.audio_buffer[self.buffer_index + 1] = right_sample;
                 self.buffer_index += 2;
@@ -186,18 +185,6 @@ impl LengthCounter {
         }
     }
 
-    pub fn get_ticks(&self) -> u32 {
-        self.ticks
-    }
-
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-
-    pub fn set_ticks(&mut self, ticks: u32) {
-        self.ticks = ticks
-    }
-
     /// Ticks LengthCounter, returning false if length has expired.
     pub fn tick(&mut self) -> bool {
         if self.enabled && self.ticks < self.max_ticks {
@@ -205,6 +192,12 @@ impl LengthCounter {
         }
 
         self.ticks == self.max_ticks
+    }
+
+    pub fn on_trigger(&mut self) {
+        if self.ticks == self.max_ticks {
+            self.ticks = 0;
+        }
     }
 }
 

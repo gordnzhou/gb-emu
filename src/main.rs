@@ -32,7 +32,7 @@ fn clear_log_file() -> std::io::Result<()> {
 fn main() -> Result<(), String> {
 
     let mut emulator = Emulator::new(SCREEN_SCALE, ROM_PATH, true)?;
-    emulator.debug_run(40e9 as u64);
+    emulator.debug_run(40e12 as u64);
 
     Ok(())
 }

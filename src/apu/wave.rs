@@ -115,7 +115,7 @@ impl Wave {
 
     fn write_nr31(&mut self, byte: u8) {
         self.nr31 = byte;
-        self.length_counter.set_ticks(byte as u32);
+        self.length_counter.ticks = byte as u32;
     }
 
     fn write_nr30(&mut self, byte: u8) {
@@ -132,12 +132,10 @@ impl Wave {
     fn write_nr34(&mut self, byte: u8) {
         if byte & 0x80 != 0 {
             self.channel_on = true;
-            if self.length_counter.get_ticks() == LENGTH_TICKS {
-                self.length_counter.set_ticks(0);
-            }
+            self.length_counter.on_trigger();
         }
 
-        self.length_counter.set_enabled(byte & 0x40 != 0);
+        self.length_counter.enabled = byte & 0x40 != 0;
         self.nr34 = byte
     }
 

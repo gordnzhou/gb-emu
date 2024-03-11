@@ -1,4 +1,4 @@
-use super::{Envelope, LengthCounter, MAX_PERIOD};
+use super::{Apu, Envelope, LengthCounter};
 
 const LENGTH_TICKS: u32 = 64;
 
@@ -9,10 +9,10 @@ pub struct Noise {
     nr44: u8,
 
     length_counter: LengthCounter,
+    lfsr: Lfsr,
+    envelope: Envelope,
     dac_on: bool,
     channel_on: bool,
-    freq_period: u32,
-    envelope: Envelope,
 }
 
 impl Noise {
@@ -24,10 +24,10 @@ impl Noise {
             nr44: 0,
 
             length_counter: LengthCounter::new(LENGTH_TICKS),
+            lfsr: Lfsr::new(),
+            envelope: Envelope::new(),
             dac_on: false,
             channel_on: false,
-            freq_period: MAX_PERIOD,
-            envelope: Envelope::new(),
         }
     }
 
@@ -36,7 +36,9 @@ impl Noise {
             return 0.0;
         }
 
-        0.0
+        let sample = self.lfsr.next_sample();
+
+        Apu::to_analog(sample * self.envelope.cur_volume)
     }
 
     pub fn step(&mut self, length_step: bool, envelope_step: bool) {
@@ -53,8 +55,6 @@ impl Noise {
         if envelope_step {
             self.envelope.step();
         }
-
-        self.freq_period = self.period_value();
     }
 
     pub fn channel_on(&self) -> bool {
@@ -74,8 +74,8 @@ impl Noise {
     pub fn write(&mut self, addr: usize, byte: u8) {
         match addr {
             0xFF20 => self.write_nr41(byte),
-            0xFF21 => self.nr42 = byte,
-            0xFF22 => self.write_nr42(byte),
+            0xFF21 => self.write_nr42(byte),
+            0xFF22 => self.write_nr43(byte),
             0xFF23 => self.write_nr44(byte),
             _ => unreachable!()
         }
@@ -83,11 +83,17 @@ impl Noise {
 
     fn write_nr41(&mut self, byte: u8) {
         self.nr41 = byte;
-        self.length_counter.set_ticks((byte & 0x3F) as u32);
+        self.length_counter.ticks = (byte & 0x3F) as u32;
     }
 
     fn write_nr42(&mut self, byte: u8) {
-        self.dac_on = byte & 0xF8 != 0;
+        if byte & 0xF8 == 0 {
+            self.dac_on = false;
+            self.channel_on = false;
+        } else {
+            self.dac_on = true;
+        }
+
         self.envelope.initial_volume = (byte & 0xF0) >> 4;
         self.envelope.envelope_up = self.nr42 & 8 != 0;
         self.envelope.sweep_pace = byte & 7;
@@ -95,20 +101,79 @@ impl Noise {
         self.nr42 = byte;
     }
 
+    fn write_nr43(&mut self, byte: u8) {
+        self.lfsr.divisor_code = byte & 7;
+        self.lfsr.width = byte & 8 != 0;
+        self.lfsr.shift_amount = (byte & 0xF0) >> 4;
+        self.nr43 = byte;
+    }
+
     fn write_nr44(&mut self, byte: u8) {
         if byte & 0x80 != 0 {
             self.channel_on = true;
             self.envelope.on_trigger();
-            if self.length_counter.get_ticks() == LENGTH_TICKS {
-                self.length_counter.set_ticks(0);
-            }
+            self.lfsr.shift_register = 0xFFFF;
+            self.length_counter.on_trigger()
         }
 
-        self.length_counter.set_enabled(byte & 0x40 != 0);
+        self.length_counter.enabled = byte & 0x40 != 0;
         self.nr44 = byte
     }
+}
 
-    fn period_value(&self) -> u32 {
-        (MAX_PERIOD - ((self.nr44 as u32 & 7) << 8 | self.nr43 as u32)) * 2
+struct Lfsr {
+    shift_register: u16,
+    width: bool,
+    shift_period: u32,
+    divisor_code: u8,
+    shift_amount: u8,
+}
+
+impl Lfsr {
+    pub fn new() -> Self {
+        Lfsr {
+            shift_register: 0xFFFF,
+            width: false,
+            shift_period: 0,
+            divisor_code: 0,
+            shift_amount: 0,
+        }
+    }
+
+    pub fn next_sample(&mut self) -> u8 {
+        if self.shift_period == 0 {
+            self.set_shift_period();
+            self.do_shift()
+        } else {
+            self.shift_period -= 1;
+        }
+
+        (!self.shift_register as u8) & 0x01
+    }
+
+    fn do_shift(&mut self) {
+        let xor_bit = (self.shift_register & 0b01) ^ ((self.shift_register & 0b10) >> 1);
+        self.shift_register = (self.shift_register >> 1) | (xor_bit << 14);
+
+        if self.width {
+            self.shift_register &= !(1 << 6);
+            self.shift_register |= xor_bit << 6;
+        }
+    }
+
+    fn set_shift_period(&mut self) {
+        let divisor = match self.divisor_code {
+            0 => 8,
+            1 => 16,
+            2 => 32,
+            3 => 48,
+            4 => 64,
+            5 => 80,
+            6 => 96,
+            7 => 112,
+            _ => unreachable!()
+        };
+
+        self.shift_period = divisor << self.shift_amount;
     }
 }

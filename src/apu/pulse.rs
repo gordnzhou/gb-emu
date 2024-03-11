@@ -118,7 +118,7 @@ impl Pulse1{
 
     fn write_nr11(&mut self, byte: u8) {
         self.nr11 = byte;
-        self.length_counter.set_ticks((byte & 0x3F) as u32);
+        self.length_counter.ticks = (byte & 0x3F) as u32;
     }
 
     fn write_nr12(&mut self, byte: u8) {
@@ -150,12 +150,10 @@ impl Pulse1{
             self.duty_index = 0;
             self.envelope.on_trigger();
             self.sweep.on_trigger();
-            if self.length_counter.get_ticks() == LENGTH_TICKS {
-                self.length_counter.set_ticks(0);
-            }
+            self.length_counter.on_trigger();
         }
 
-        self.length_counter.set_enabled(byte & 0x40 != 0);
+        self.length_counter.enabled = byte & 0x40 != 0;
     }
 
     fn period_value(&self) -> u32 {
@@ -191,8 +189,8 @@ impl Pulse2 {
             dac_on: false,
             channel_on: false,
             duty_index: 0,
-            freq_period: 0,
-            freq_counter: MAX_PERIOD,
+            freq_period: MAX_PERIOD,
+            freq_counter: 0,
         }
     }
 
@@ -257,7 +255,7 @@ impl Pulse2 {
 
     fn write_nr21(&mut self, byte: u8) {
         self.nr21 = byte;
-        self.length_counter.set_ticks((byte & 0x3F) as u32);
+        self.length_counter.ticks = (byte & 0x3F) as u32;
     }
 
     fn write_nr22(&mut self, byte: u8) {
@@ -280,12 +278,10 @@ impl Pulse2 {
             self.channel_on = true;
             self.duty_index = 0;
             self.envelope.on_trigger();
-            if self.length_counter.get_ticks() == LENGTH_TICKS {
-                self.length_counter.set_ticks(0);
-            }
+            self.length_counter.on_trigger();
         }
 
-        self.length_counter.set_enabled(byte & 0x40 != 0);
+        self.length_counter.enabled = byte & 0x40 != 0;
         self.nr24 = byte;
     }
 
