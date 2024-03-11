@@ -126,19 +126,7 @@ impl Stepper {
         return periods_elapsed
     }
 
-    pub fn set_steps_so_far(&mut self, steps: u32) {
-        self.steps_so_far = steps;
-    }
-
     pub fn set_period(&mut self, period: u32) {
         self.period = period;
     }
-
-    // pub fn get_steps_so_far(&self) -> u32 {
-    //     self.steps_so_far
-    // }
-
-    // pub fn get_period(&self) -> u32 {
-    //     self.period
-    // }
 }

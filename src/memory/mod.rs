@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, Read};
 
-const BOOTROM_PATH: &str = "roms/bootrom";
+const BOOTROM_PATH: &str = "roms/bootrom.gb";
 
 const ROM_SIZE: usize = 0x8000;
 const ERAM_SIZE: usize = 0x2000;

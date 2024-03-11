@@ -1,11 +1,7 @@
-use crate::timer::Stepper;
-
-use super::Apu;
+use super::{Apu, LengthCounter, MAX_PERIOD};
 
 const WAVE_RAM_SIZE: usize = 32;
-
-const MAX_LENGTH: u32 = 256;
-const MAX_PERIOD: u32 = 2048;
+const LENGTH_TICKS: u32 = 256;
 
 pub struct Wave {
     nr30: u8,
@@ -17,7 +13,7 @@ pub struct Wave {
 
     dac_on: bool,
     channel_on: bool,
-    length_stepper: Stepper,
+    length_counter: LengthCounter,
     sample_index: usize,
     freq_counter: u32,
     freq_period: u32,
@@ -35,7 +31,7 @@ impl Wave {
 
             dac_on: false,
             channel_on: false,
-            length_stepper: Stepper::new(0, MAX_LENGTH),
+            length_counter: LengthCounter::new(LENGTH_TICKS),
             sample_index: 0,
             freq_counter: 0,
             freq_period: MAX_PERIOD,
@@ -64,16 +60,17 @@ impl Wave {
         Apu::to_analog(self.wave_ram[self.sample_index] >> volume)
     }
 
-    pub fn step(&mut self, length_steps: u32) {
-        if self.nr34 & 0x40 != 0 && length_steps > 0 {
-            let length_over = self.length_stepper.step(length_steps);
+    pub fn step(&mut self, length_step: bool) {
+        if !self.channel_on {
+            return;
+        }
 
-            if length_over != 0 {
-                self.length_stepper.set_steps_so_far(256);
+        if length_step {
+            if self.length_counter.tick() {
                 self.channel_on = false;
             }
-        } 
-
+        }
+        
         self.freq_period = self.period_value();
     }
 
@@ -84,10 +81,7 @@ impl Wave {
             0xFF1C => self.nr32 | 0x9F,
             0xFF1D => self.nr33 | 0xFF,
             0xFF1E => self.nr34 | 0xBF,
-            0xFF30..=0xFF3F => {
-                let wave_addr = (addr - 0xFF30) << 1;
-                self.wave_ram[wave_addr] << 4 | self.wave_ram[wave_addr + 1]
-            }
+            0xFF30..=0xFF3F => self.read_wave_ram(addr),
             _ => unreachable!()
         }
     }
@@ -99,11 +93,7 @@ impl Wave {
             0xFF1C => self.nr32 = byte,
             0xFF1D => self.nr33 = byte,
             0xFF1E => self.write_nr34(byte),
-            0xFF30..=0xFF3F => {
-                let wave_addr = (addr - 0xFF30) << 1;
-                self.wave_ram[wave_addr] = (byte & 0xF0) >> 4;
-                self.wave_ram[wave_addr + 1] = byte & 0x0F;
-            }
+            0xFF30..=0xFF3F => self.write_wave_ram(addr, byte),
             _ => unreachable!()
         };
     }
@@ -112,35 +102,46 @@ impl Wave {
         self.channel_on
     }
 
+    fn read_wave_ram(&self, addr: usize) -> u8 {
+        let wave_addr = (addr - 0xFF30) << 1;
+        self.wave_ram[wave_addr] << 4 | self.wave_ram[wave_addr + 1]
+    }
+
+    fn write_wave_ram(&mut self, addr: usize, byte: u8) {
+        let wave_addr = (addr - 0xFF30) << 1;
+        self.wave_ram[wave_addr] = (byte & 0xF0) >> 4;
+        self.wave_ram[wave_addr + 1] = byte & 0x0F;
+    }
+
     fn write_nr31(&mut self, byte: u8) {
         self.nr31 = byte;
-        self.length_stepper.set_steps_so_far(byte as u32);
+        self.length_counter.set_ticks(byte as u32);
     }
 
     fn write_nr30(&mut self, byte: u8) {
-        self.nr30 = byte;
-
-        if self.nr30 & 0x80 == 0 {
+        if byte & 0x80 == 0 {
             self.dac_on = false;
             self.channel_on = false;
         } else {
             self.dac_on = true;
         }
+
+        self.nr30 = byte;
     }
 
     fn write_nr34(&mut self, byte: u8) {
         if byte & 0x80 != 0 {
             self.channel_on = true;
-            // println!("trigger {}", self.period_value());
-            // if self.length_stepper.get_steps_so_far() == MAX_LENGTH {
-            //     self.length_stepper.set_steps_so_far(0);
-            // }
+            if self.length_counter.get_ticks() == LENGTH_TICKS {
+                self.length_counter.set_ticks(0);
+            }
         }
 
+        self.length_counter.set_enabled(byte & 0x40 != 0);
         self.nr34 = byte
     }
 
     fn period_value(&self) -> u32 {
-        (2048 - ((self.nr34 as u32 & 7) << 8 | self.nr33 as u32)) * 2
+        (MAX_PERIOD - ((self.nr34 as u32 & 7) << 8 | self.nr33 as u32)) * 2
     }
 }
