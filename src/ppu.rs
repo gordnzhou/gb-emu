@@ -525,17 +525,17 @@ impl Ppu {
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::Cpu;
+    use crate::{cartridge::Cartridge, cpu::Cpu};
 
     use super::{LCD_HEIGHT, LCD_WIDTH};
 
     const TEST_FILE: &str = "roms/dmg-acid2.gb";
-    const CHECKSUM: u32 = 203719462;
+    const CHECKSUM: u32 = 3249083280;
 
     #[test]
     fn ppu_test() {
-        let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, None);
-        cpu.bus.memory.load_from_file(TEST_FILE);
+        let cartridge = Cartridge::from_file(TEST_FILE, false);
+        let mut cpu = Cpu::new(cartridge);
 
         let mut cycles: u32 = 0;
 

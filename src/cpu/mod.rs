@@ -7,6 +7,7 @@ use self::register::Register;
 use self::Interrupt::*;
 
 use crate::bus::Bus;
+use crate::cartridge::Cartridge;
 
 pub struct Cpu {
     pub bus: Bus,
@@ -34,21 +35,43 @@ pub enum Interrupt {
 }
 
 impl Cpu {
-    pub fn new(af: u16, bc: u16, de: u16, hl: u16, pc: u16, sp: u16, sdl: Option<Sdl>) -> Self {
-        Cpu { 
-            bus: Bus::new(sdl),
-            scheduled_ei: false,
-            ime: false,
-            halted: false,
-            halt_bug: false,
-            halt_triggered: false,
-            af: Register(af),
-            bc: Register(bc),
-            de: Register(de),
-            hl: Register(hl),
-            pc: Register(pc),
-            sp: Register(sp),
+    pub fn new(cartridge: Cartridge) -> Self {
+        if cartridge.has_bootrom() {
+            Cpu { 
+                bus: Bus::new(cartridge),
+                scheduled_ei: false,
+                ime: false,
+                halted: false,
+                halt_bug: false,
+                halt_triggered: false,
+                af: Register(0),
+                bc: Register(0),
+                de: Register(0),
+                hl: Register(0),
+                pc: Register(0),
+                sp: Register(0),
+            }
+        } else {
+            Cpu { 
+                bus: Bus::new(cartridge),
+                scheduled_ei: false,
+                ime: false,
+                halted: false,
+                halt_bug: false,
+                halt_triggered: false,
+                af: Register(0x01B0),
+                bc: Register(0x0013),
+                de: Register(0x00D8),
+                hl: Register(0x014D),
+                pc: Register(0x0100),
+                sp: Register(0xFFFE),
+            }
         }
+    }
+
+    pub fn with_audio(mut self, sdl: Sdl) -> Self {
+        self.bus = self.bus.with_audio(sdl);
+        self
     }
 
     /// Steps through all parts of the emulator over the period
@@ -120,7 +143,7 @@ impl Cpu {
 #[cfg(test)]
 mod tests {
     use core::panic;
-    use crate::cpu::Cpu;
+    use crate::{cartridge::Cartridge, cpu::Cpu};
 
     const TIMEOUT: u64 = 1 << 32;
     const TEST_FILES: [&str; 11] = [
@@ -140,8 +163,8 @@ mod tests {
     #[test]
     fn cpu_instr_test() {
         'outer: for test in TEST_FILES {
-            let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, None);
-            cpu.bus.memory.load_from_file(&*format!("roms/{}", test));
+            let cartridge = Cartridge::from_file(&*format!("roms/{}", test), false);
+            let mut cpu = Cpu::new(cartridge);
 
             let mut cycles: u64 = 0;
             while cycles < TIMEOUT {

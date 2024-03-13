@@ -7,6 +7,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::EventPump;
 
+use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 
 // in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
@@ -44,34 +45,26 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new(screen_scale: i32, rom_path: &str, skip_bootrom: bool) -> Result<Self, String> {
+    pub fn new(screen_scale: i32, cartrige: Cartridge) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
 
         let video_subsystem = sdl_context.video()?;
         let window = Emulator::build_window(video_subsystem, screen_scale as u32)?;
-        let canvas: Canvas<Window> = window
+        let mut canvas: Canvas<Window> = window
             .into_canvas()
             .build()
             .map_err(|e| e.to_string())?;
 
+        canvas.window_mut().set_title(&cartrige.get_title()).unwrap();
+
         let event_pump = sdl_context.event_pump()?;
-
-        let mut cpu = if !skip_bootrom {
-            let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0, Some(sdl_context));
-            cpu.bus.memory.load_bootrom();
-            cpu
-        } else {
-            Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, Some(sdl_context))
-        };
-
-        cpu.bus.memory.load_from_file(rom_path);
 
         Ok(Emulator {
             event_pump,
             canvas,
             screen_scale,
             key_status: 0xFF,
-            cpu,
+            cpu: Cpu::new(cartrige).with_audio(sdl_context),
         })
     }
 

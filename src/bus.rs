@@ -4,7 +4,7 @@ use crate::joypad::Joypad;
 use crate::apu::Apu;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
-use crate::memory::Memory;
+use crate::cartridge::Cartridge;
 use crate::cpu::Interrupt;
 
 const WRAM_SIZE: usize = 0x2000;
@@ -12,7 +12,7 @@ const HRAM_SIZE: usize = 0x0080;
 // const TOTAL_SIZE: usize = 0x10000;
 
 pub struct Bus {
-    pub memory: Memory,
+    pub cartridge: Cartridge,
     pub joypad: Joypad,
     pub apu: Apu,
     pub ppu: Ppu,
@@ -26,11 +26,11 @@ pub struct Bus {
 }
 
 impl Bus {
-    pub fn new(sdl: Option<Sdl>) -> Self {
+    pub fn new(cartridge: Cartridge) -> Self {
         Bus {
-            memory: Memory::new(),
+            cartridge,
             joypad: Joypad::new(),
-            apu: Apu::new(sdl),
+            apu: Apu::new(None),
             ppu: Ppu::new(),
             timer: Timer::new(),
             wram: [0; WRAM_SIZE],
@@ -40,6 +40,11 @@ impl Bus {
 
             serial_output: String::new(),
         }
+    }
+
+    pub fn with_audio(mut self, sdl: Sdl) -> Self {
+        self.apu = Apu::new(Some(sdl));
+        self
     }
 
     /// Steps through APU, PPU and Timer, and updates interrupt flag(s).
@@ -69,9 +74,9 @@ impl Bus {
         let addr = addr as usize;
 
         match addr {
-            0x0000..=0x7FFF => self.memory.read_rom(addr),
+            0x0000..=0x7FFF => self.cartridge.read_rom(addr),
             0x8000..=0x9FFF => self.ppu.read_vram(addr),
-            0xA000..=0xBFFF => self.memory.read_eram(addr),
+            0xA000..=0xBFFF => self.cartridge.read_eram(addr),
             0xC000..=0xDFFF => self.wram[addr - 0xC000],
             0xE000..=0xFDFF => self.wram[addr - 0xE000],
             0xFE00..=0xFE9F => self.ppu.read_oam(addr),
@@ -84,7 +89,7 @@ impl Bus {
             0xFF10..=0xFF26 => self.apu.read_io(addr),
             0xFF30..=0xFF3F => self.apu.read_io(addr),
             0xFF40..=0xFF4B => self.ppu.read_io(addr),
-            0xFF50          => self.memory.read_bank(),
+            0xFF50          => self.cartridge.read_bank(),
         
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80],
             0xFFFF          => self.interrupt_enable,
@@ -113,7 +118,7 @@ impl Bus {
             0xFF10..=0xFF26 => self.apu.write_io(addr, byte),
             0xFF30..=0xFF3F => self.apu.write_io(addr, byte),
             0xFF40..=0xFF4B => self.ppu_write(addr, byte),
-            0xFF50          => self.memory.write_bank(byte),
+            0xFF50          => self.cartridge.write_bank(byte),
 
             0xFF80..=0xFFFE => self.hram[addr - 0xFF80] = byte,
             0xFFFF          => self.interrupt_enable = byte,
