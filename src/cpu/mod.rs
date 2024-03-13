@@ -1,6 +1,8 @@
 mod instr;
 mod register;
 
+use sdl2::Sdl;
+
 use self::register::Register;
 use self::Interrupt::*;
 
@@ -32,9 +34,9 @@ pub enum Interrupt {
 }
 
 impl Cpu {
-    pub fn new(af: u16, bc: u16, de: u16, hl: u16, pc: u16, sp: u16) -> Self {
+    pub fn new(af: u16, bc: u16, de: u16, hl: u16, pc: u16, sp: u16, sdl: Option<Sdl>) -> Self {
         Cpu { 
-            bus: Bus::new(),
+            bus: Bus::new(sdl),
             scheduled_ei: false,
             ime: false,
             halted: false,
@@ -138,7 +140,7 @@ mod tests {
     #[test]
     fn cpu_instr_test() {
         'outer: for test in TEST_FILES {
-            let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
+            let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, None);
             cpu.bus.memory.load_from_file(&*format!("roms/{}", test));
 
             let mut cycles: u64 = 0;

@@ -1,6 +1,7 @@
 use super::{Apu, Envelope, LengthCounter, Sweep, MAX_PERIOD};
 
 
+
 const LENGTH_TICKS: u32 = 64;
 
 const DUTY_SAMPLE_SIZE: usize = 8;
@@ -51,7 +52,7 @@ impl Pulse1{
             return 0.0;
         }
 
-        if self.freq_counter >= self.sweep.cur_period {
+        if self.freq_counter >= self.period_value() {
             self.freq_counter = 0;
             self.duty_index = (self.duty_index + 1) % DUTY_SAMPLE_SIZE;
         }
@@ -157,7 +158,7 @@ impl Pulse1{
     }
 
     fn period_value(&self) -> u32 {
-        (MAX_PERIOD - ((self.nr14 as u32 & 7) << 8 | self.nr13 as u32)) * 2
+        MAX_PERIOD - ((self.nr14 as u32 & 7) << 8 | self.nr13 as u32)
     }
 }
 
@@ -286,6 +287,6 @@ impl Pulse2 {
     }
 
     fn period_value(&self) -> u32 {
-        (MAX_PERIOD - ((self.nr24 as u32 & 7) << 8 | self.nr23 as u32)) * 2
+        MAX_PERIOD - ((self.nr24 as u32 & 7) << 8 | self.nr23 as u32)
     }
 }

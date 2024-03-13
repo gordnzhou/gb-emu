@@ -6,7 +6,6 @@ use sdl2::rect::Rect;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::EventPump;
-use sdl2::audio::{AudioQueue, AudioSpecDesired};
 
 use crate::cpu::Cpu;
 
@@ -34,16 +33,12 @@ pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
 pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
 const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
 
-pub const SAMPLING_RATE_HZ: u32 = 48000;
-pub const AUDIO_SAMPLES: usize = 2048;
-
 use std::time::{Duration, Instant};
 
 pub struct Emulator {
     event_pump: EventPump,
     screen_scale: i32,
     canvas: Canvas<Window>,
-    audio_device: AudioQueue<f32>,
     key_status: u8,
     cpu: Cpu,
 }
@@ -61,22 +56,12 @@ impl Emulator {
 
         let event_pump = sdl_context.event_pump()?;
 
-        let desired_spec = AudioSpecDesired {
-            freq: Some(SAMPLING_RATE_HZ as i32),
-            channels: Some(2),
-            samples: Some(AUDIO_SAMPLES as u16 ),
-        };
-
-        let audio_subsystem = sdl_context.audio()?;
-        let audio_device = audio_subsystem.open_queue(None, &desired_spec)?;
-        audio_device.resume();
-
         let mut cpu = if !skip_bootrom {
-            let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0);
+            let mut cpu = Cpu::new(0, 0, 0, 0, 0, 0, Some(sdl_context));
             cpu.bus.memory.load_bootrom();
             cpu
         } else {
-            Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE)
+            Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, Some(sdl_context))
         };
 
         cpu.bus.memory.load_from_file(rom_path);
@@ -85,7 +70,6 @@ impl Emulator {
             event_pump,
             canvas,
             screen_scale,
-            audio_device,
             key_status: 0xFF,
             cpu,
         })
@@ -105,29 +89,6 @@ impl Emulator {
         println!("Created window of width {} and height {}", window_width, window_height);
         Ok(window)
     }
-
-    /// Runs the emulator.
-    // pub fn run(&mut self) {
-    //     let mut last_instr = Instant::now();
-    //     let mut cpu_duration_ns: f32 = 0.0;
-
-    //     loop {
-    //         if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns as u64) {
-    //             last_instr = Instant::now();
-    //             let cycles = self.cpu.step();
-
-    //             cpu_duration_ns = cycles as f32 * (DOT_DURATION_NS * 4.0);
-
-    //             self.play_audio();
-    //             // self.draw_window();
-    //         }
-
-    //         match self.get_events() {
-    //             Ok(_) => self.cpu.bus.joypad.step(self.key_status),
-    //             Err(e) => panic!("{}", e)
-    //         }
-    //     }
-    // }
 
     /// Runs the emulator for the specified number of nanoseconds.
     pub fn debug_run(&mut self, total_dur_ns: u64) {
@@ -151,7 +112,6 @@ impl Emulator {
                 last_instr = Instant::now();
                 let cycles = self.cpu.step();
                 self.cpu.bus.joypad.step(self.key_status);
-                self.play_audio();
                 self.next_frame(&mut texture, rect);
 
                 cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
@@ -160,12 +120,12 @@ impl Emulator {
         } 
     }
 
-    fn play_audio(&mut self) {
-        if self.cpu.bus.apu.buffer_index >= AUDIO_SAMPLES {
-            self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
-            self.cpu.bus.apu.buffer_index = 0;
-        }
-    }
+    // fn play_audio(&mut self) {
+    //     if self.cpu.bus.apu.buffer_index >= AUDIO_SAMPLES {
+    //         self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
+    //         self.cpu.bus.apu.buffer_index = 0;
+    //     }
+    // }
 
     fn get_events(&mut self) -> Result<(), &str> { 
         for event in self.event_pump.poll_iter() {

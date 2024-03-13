@@ -140,6 +140,6 @@ impl Wave {
     }
 
     fn period_value(&self) -> u32 {
-        (MAX_PERIOD - ((self.nr34 as u32 & 7) << 8 | self.nr33 as u32)) * 2
+        MAX_PERIOD - ((self.nr34 as u32 & 7) << 8 | self.nr33 as u32)
     }
 }

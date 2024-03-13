@@ -1,3 +1,5 @@
+use sdl2::Sdl;
+
 use crate::joypad::Joypad;
 use crate::apu::Apu;
 use crate::ppu::Ppu;
@@ -24,11 +26,11 @@ pub struct Bus {
 }
 
 impl Bus {
-    pub fn new() -> Self {
+    pub fn new(sdl: Option<Sdl>) -> Self {
         Bus {
             memory: Memory::new(),
             joypad: Joypad::new(),
-            apu: Apu::new(),
+            apu: Apu::new(sdl),
             ppu: Ppu::new(),
             timer: Timer::new(),
             wram: [0; WRAM_SIZE],

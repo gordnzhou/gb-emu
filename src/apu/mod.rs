@@ -1,18 +1,60 @@
-mod pulse;
-mod wave;
-mod noise;
+mod channels;
+mod envelope;
+mod length_counter;
+mod sweep;
 
-use crate::emulator::{CYCLE_HZ, SAMPLING_RATE_HZ, AUDIO_SAMPLES};
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::time::Duration;
+
+use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
+use sdl2::{AudioSubsystem, Sdl};
+
+use crate::emulator::CYCLE_HZ;
 use crate::timer::Stepper;
-use self::pulse::{Pulse1, Pulse2};
-use self::wave::Wave;
-use self::noise::Noise;
+use self::channels::*;
+use envelope::Envelope;
+use length_counter::LengthCounter;
+use sweep::Sweep;
 
 const MAX_PERIOD: u32 = 2048;
 
+const SAMPLING_RATE_HZ: u32 = 48000;
+const AUDIO_SAMPLES: usize = 2048;
+
+struct Callback {
+    audio_rx: Receiver<[[f32; 2]; AUDIO_SAMPLES]>,
+    prev_sample: [f32; 2],
+}
+
+impl AudioCallback for Callback {
+    type Channel = f32;
+
+    fn callback(&mut self, stream: &mut [f32]) {
+        match self.audio_rx.recv_timeout(Duration::from_millis(30)) {
+            Ok(buffer) => {
+                // TODO: update audio such that no buffer underruns occur
+                for i in 0..buffer.len() {
+                    stream[i * 2] = buffer[i][0];
+                    stream[i * 2 + 1] = buffer[i][1];
+                }
+            
+                self.prev_sample = buffer[buffer.len() - 1];
+            }
+            Err(_) => {
+                for i in 0..stream.len() {
+                    stream[i] = self.prev_sample[i % 2];
+                }
+            }
+        }
+    }
+}
+
 pub struct Apu {
-    pub audio_buffer: [f32; AUDIO_SAMPLES],
-    pub buffer_index: usize,
+    audio_tx: Option<SyncSender<[[f32; 2]; AUDIO_SAMPLES]>>,
+    _audio_subsystem: Option<AudioSubsystem>,
+    _audio_device: Option<AudioDevice<Callback>>,
+    audio_buffer: [[f32; 2]; AUDIO_SAMPLES * 4],
+    buffer_index: usize,
     sample_gather: u32,
     nr52: u8,
     nr51: u8,
@@ -30,10 +72,39 @@ pub struct Apu {
 }
 
 impl Apu {
-    pub fn new() -> Self {
+    pub fn new(sdl: Option<Sdl>) -> Self {
+        let mut audio_tx = None;
+        let mut _audio_subsystem = None;
+        let mut _audio_device = None;
+
+        match sdl {
+            Some(sdl_context) => {
+                let (_audio_tx, audio_rx) = std::sync::mpsc::sync_channel(4);
+                audio_tx = Some(_audio_tx);
+
+                let desired_spec = AudioSpecDesired {
+                    freq: Some(SAMPLING_RATE_HZ as i32),
+                    channels: Some(2),
+                    samples: Some(AUDIO_SAMPLES as u16),
+                };
+
+                let audio_subsystem = sdl_context.audio().unwrap();
+                let audio_device = audio_subsystem.open_playback(None, &desired_spec, |_spec| {
+                    Callback { audio_rx, prev_sample: [0.0; 2] }
+                }).unwrap();
+                audio_device.resume();
+
+                _audio_device = Some(audio_device);
+                _audio_subsystem = Some(audio_subsystem);
+            }
+            None => {}
+        }
+
         Apu { 
-            // Audio samples are in the form: [L1, R1, L2, R2, ...] for L and R channels
-            audio_buffer: [0.0; AUDIO_SAMPLES],
+            audio_tx,
+            _audio_device,
+            _audio_subsystem,
+            audio_buffer: [[0.0; 2]; AUDIO_SAMPLES * 4],
             buffer_index: 0,
             sample_gather: 0,
             nr52: 0,
@@ -66,13 +137,14 @@ impl Apu {
         self.wave  .step(length_step);
         self.noise .step(length_step, envelope_step);
         
-        for _ in 0..(4 * cycles) {
+        for _ in 0..cycles {
             let pulse1_sample = self.pulse1.make_sample();
             let pulse2_sample = self.pulse2.make_sample();
             let wave_sample = self.wave.make_sample();
             let noise_sample = self.noise.make_sample();
             
-            if self.sample_gather == (4 * CYCLE_HZ / SAMPLING_RATE_HZ) {
+            // TODO: TEMPORARY FIX FOR BUFFER UNDERRUNS
+            if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) - 1 {
                 self.sample_gather = 0;
 
                 let mut right_sample = 0.0;
@@ -91,11 +163,29 @@ impl Apu {
                 left_sample /= (self.nr51 & 0xF0).count_ones() as f32;
                 left_sample *= (((self.nr50 >> 4) & 7) + 1) as f32 / 8.0;
 
-                self.audio_buffer[self.buffer_index] = left_sample;
-                self.audio_buffer[self.buffer_index + 1] = right_sample;
-                self.buffer_index += 2;
+                self.audio_buffer[self.buffer_index][0] = left_sample;
+                self.audio_buffer[self.buffer_index][1] = right_sample;
+                self.buffer_index += 1;
             }
             self.sample_gather += 1;
+        }
+
+        if self.buffer_index >= AUDIO_SAMPLES {
+            match &mut self.audio_tx {
+                Some(audio_tx) => {
+                    let mut res = [[0.0; 2]; AUDIO_SAMPLES];
+                    res.copy_from_slice(&self.audio_buffer[0..AUDIO_SAMPLES]);
+                    for i in AUDIO_SAMPLES..self.buffer_index {
+                        self.audio_buffer[i - AUDIO_SAMPLES] = self.audio_buffer[i];
+                    }
+                    self.buffer_index -= AUDIO_SAMPLES;
+
+                    audio_tx.send(res).unwrap();
+                }
+                None => {
+                    self.buffer_index = 0;
+                }
+            }
         }
     }
 
@@ -168,166 +258,4 @@ impl Apu {
         self.noise = Noise::new();
     }
 
-}
-
-struct LengthCounter {
-    enabled: bool,
-    ticks: u32,
-    max_ticks: u32,
-}
-
-impl LengthCounter {
-    pub fn new(max_ticks: u32) -> Self {
-        LengthCounter {
-            enabled: false,
-            ticks: 0,
-            max_ticks,
-        }
-    }
-
-    /// Ticks LengthCounter, returning false if length has expired.
-    pub fn tick(&mut self) -> bool {
-        if self.enabled && self.ticks < self.max_ticks {
-            self.ticks += 1;
-        }
-
-        self.ticks == self.max_ticks
-    }
-
-    pub fn on_trigger(&mut self) {
-        if self.ticks == self.max_ticks {
-            self.ticks = 0;
-        }
-    }
-}
-
-struct Envelope {
-    cur_volume: u8,
-    sweep_pace: u8, 
-    initial_volume: u8,
-    envelope_up: bool,
-    sweep_ticks: u8,
-}
-
-impl Envelope {
-    pub fn new() -> Self {
-        Envelope {
-            cur_volume: 0,
-            sweep_ticks: 0,
-            sweep_pace: 0,
-            initial_volume: 0,
-            envelope_up: false,
-        }
-    }
-
-    pub fn step(&mut self) {
-        if self.sweep_pace == 0 {
-            return;
-        }
-
-        self.sweep_ticks += 1;
-
-        if self.sweep_ticks == self.sweep_pace {
-            self.sweep_ticks = 0;
-
-            let next_volume = if self.envelope_up {
-                self.cur_volume as i8 + 1
-            } else {
-                self.cur_volume as i8 - 1
-            };
-
-            if 0x0 <= next_volume && next_volume <= 0xF {
-                self.cur_volume = next_volume as u8;
-            }
-        }
-    }
-    
-    pub fn on_trigger(&mut self) {
-        self.sweep_ticks = 0;
-        self.cur_volume = self.initial_volume;
-    }
-}
-
-struct Sweep {
-    cur_period: u32,
-    shadow_period: u32,
-
-    enabled: bool,
-    sweep_period: u32,
-    sweep_ticks: u32, 
-
-    sweep_up: bool,
-    shift: u32,
-}
-
-impl Sweep {
-    pub fn new() -> Self {
-        Sweep {
-            cur_period: 0,
-            shadow_period: 0,
-
-            enabled: false,
-            sweep_period: 8,
-            sweep_ticks: 0,
-
-            sweep_up: false,
-            shift: 0,    
-        }
-    }
-
-    /// Returns false if sweep iteration results in channel being disabled
-    pub fn step(&mut self, nr13: &mut u8, nr14: &mut u8) -> bool {
-        self.sweep_ticks += 1;
-
-        if self.sweep_ticks == self.sweep_period {
-            self.sweep_ticks = if self.sweep_period != 0 {
-                0
-            } else { 8 };
-
-            if self.enabled && self.sweep_period != 0 {
-                let next_period = match self.next_period() {
-                    Some(next_period) => next_period,
-                    _ => return false, 
-                };
-
-                if self.shift > 0 {
-                    self.shadow_period = next_period;
-                    self.cur_period = next_period;
-                    *nr13 = (next_period & 0xFF) as u8;
-                    *nr14 = (*nr14 & 0xF8) | ((next_period & 0x700) >> 8) as u8;
-                    
-                    return self.next_period() == None
-                }
-            }
-        } 
-
-        return true;
-    }
-
-    /// Returns next period or None if it will result in an overflow.
-    fn next_period(&self) -> Option<u32> {
-        let next_period = if self.sweep_up {
-            self.shadow_period + self.shadow_period >> self.shift
-        } else {
-            self.shadow_period - self.shadow_period >> self.shift
-        };
-
-        if next_period > 0x7FF {
-            Some(next_period)
-        } else { None }
-    }
-    
-    /// Returns false if sweep iteration results in channel being disabled
-    pub fn on_trigger(&mut self) -> bool {
-        self.sweep_ticks = if self.sweep_period != 0 {
-            0
-        } else { 8 };
-
-        self.shadow_period = self.cur_period;
-        self.enabled = self.sweep_period > 0 || self.shift > 0;
-        
-        if self.shift > 0 {
-            return self.next_period() == None;
-        } else { true }
-    }
 }

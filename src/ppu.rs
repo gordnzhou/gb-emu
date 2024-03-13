@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn ppu_test() {
-        let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE);
+        let mut cpu = Cpu::new(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, None);
         cpu.bus.memory.load_from_file(TEST_FILE);
 
         let mut cycles: u32 = 0;
