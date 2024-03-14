@@ -23,13 +23,10 @@ pub struct Mbc1 {
 impl Mbc for Mbc1 {
     fn read_rom(&self, addr: usize) -> u8 {
         match addr {
-            0x0000..=0x3FFF => {
-                let bank = if self.banking_mode { self.current_rom_bank & 0xE0 } else { 0 };
-                self.rom[bank][addr]
-            }
+            0x0000..=0x3FFF => self.rom[0][addr],
             0x4000..=0x7FFF => {
                 let bank = match self.current_rom_bank {
-                    0x20 | 0x40 | 0x60 => self.current_rom_bank + 1,
+                    0x00 | 0x20 | 0x40 | 0x60 => self.current_rom_bank + 1,
                     _ => self.current_rom_bank
                 };
 
@@ -98,6 +95,20 @@ impl Mbc for Mbc1 {
         }
         ret
     }
+
+    fn save_ram(&self) {
+        let battery = match &self.battery {
+            Some(battery) => battery,
+            None => return
+        };
+
+        let ram: &Vec<[u8; 8192]> = match &self.ram {
+            Some(ram) => ram,
+            None => return
+        };
+
+        battery.save_ram_to_file(ram);
+    }
 }
 
 impl Mbc1 {
@@ -143,7 +154,11 @@ impl Mbc1 {
     }
 
     pub fn with_battery(mut self, title: String) -> Self {
-        self.battery = Some(Battery::new(title));
+        let (battery, ram) = Battery::new(title);    
+        if ram.is_some() {
+            self.ram = ram;
+        }
+        self.battery = Some(battery);
         self
     }
 }

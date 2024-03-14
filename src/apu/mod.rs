@@ -117,9 +117,9 @@ impl Apu {
             noise: Noise::new(),
 
             apu_on: true,
-            length_stepper: Stepper::new(0, 2),
+            length_stepper: Stepper::new(1, 2),
             envelope_stepper: Stepper::new(0, 8),
-            sweep_stepper: Stepper::new(0, 4),
+            sweep_stepper: Stepper::new(1, 4),
         }
     }
 

@@ -32,7 +32,7 @@ fn clear_log_file() -> std::io::Result<()> {
 
 fn main() -> Result<(), String> {
 
-    let cartridge = Cartridge::from_file(ROM_PATH, true);
+    let cartridge = Cartridge::from_file(ROM_PATH, false);
     let mut emulator = Emulator::new(SCREEN_SCALE, cartridge)?;
     emulator.debug_run(40e12 as u64);
 

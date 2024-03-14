@@ -52,8 +52,12 @@ impl Cpu {
                 sp: Register(0),
             }
         } else {
+            let mut bus = Bus::new(cartridge);
+            bus.ppu.write_io(0xFF40, 0x91);
+            bus.ppu.write_io(0xFF41, 0x81);
+
             Cpu { 
-                bus: Bus::new(cartridge),
+                bus,
                 scheduled_ei: false,
                 ime: false,
                 halted: false,

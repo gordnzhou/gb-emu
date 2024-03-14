@@ -46,14 +46,14 @@ impl Noise {
             return;
         }
 
+        if envelope_step {
+            self.envelope.step();
+        }
+
         if length_step {
             if self.length_counter.tick() {
                 self.channel_on = false;
             }
-        }
-
-        if envelope_step {
-            self.envelope.step();
         }
     }
 
@@ -95,7 +95,7 @@ impl Noise {
         }
 
         self.envelope.initial_volume = (byte & 0xF0) >> 4;
-        self.envelope.envelope_up = self.nr42 & 8 != 0;
+        self.envelope.envelope_up = (byte & 8) != 0;
         self.envelope.sweep_pace = byte & 7;
 
         self.nr42 = byte;

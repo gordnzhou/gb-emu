@@ -55,7 +55,8 @@ impl Emulator {
             .build()
             .map_err(|e| e.to_string())?;
 
-        canvas.window_mut().set_title(&cartrige.get_title()).unwrap();
+        let title = &format!("Playing: {}", &cartrige.get_title());
+        canvas.window_mut().set_title(title).unwrap();
 
         let event_pump = sdl_context.event_pump()?;
 
@@ -125,6 +126,7 @@ impl Emulator {
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                    self.cpu.bus.cartridge.save_ram();
                     return Err("User Exited");
                 },
                 Event::KeyDown { keycode: Some(key), ..} => {   

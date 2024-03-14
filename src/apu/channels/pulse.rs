@@ -69,18 +69,18 @@ impl Pulse1{
             return;
         }
 
-        if length_step {
-            if self.length_counter.tick() {
-                self.channel_on = false;
-            }
-        }
-
         if envelope_step {
             self.envelope.step();
         }
 
         if sweep_step {
             self.channel_on = self.sweep.step(&mut self.nr13, &mut self.nr14);
+        }
+
+        if length_step {
+            if self.length_counter.tick() {
+                self.channel_on = false;
+            }
         }
     }
 
@@ -131,7 +131,7 @@ impl Pulse1{
         }
 
         self.envelope.initial_volume = (byte & 0xF0) >> 4;
-        self.envelope.envelope_up = self.nr12 & 8 != 0;
+        self.envelope.envelope_up = byte & 8 != 0;
         self.envelope.sweep_pace = byte & 7;
 
         self.nr12 = byte;
@@ -217,14 +217,14 @@ impl Pulse2 {
             return;
         }
 
+        if envelope_step {
+            self.envelope.step();
+        }
+
         if length_step {
             if self.length_counter.tick() {
                 self.channel_on = false;
             }
-        }
-
-        if envelope_step {
-            self.envelope.step();
         }
 
         self.freq_period = self.period_value();

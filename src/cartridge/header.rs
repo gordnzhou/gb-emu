@@ -38,14 +38,15 @@ impl Header {
         
         let title_bytes = header_bytes[0x34..=0x43].to_vec();
         let title = match String::from_utf8(title_bytes) {
-            Ok(s) => s,
-            Err(_) => String::from("")
+            Ok(s) => s.replace("\0", ""),
+            Err(_) => String::from(""),
         };
 
         let manufacturer_code = match String::from_utf8(header_bytes[0x3F..=0x42].to_vec()) {
-            Ok(s) => s,
-            Err(_) => String::from("")
+            Ok(s) => s.replace("\0", ""),
+            Err(_) => String::from(""),
         };
+
 
         let cgb_flag = header_bytes[0x43];
 

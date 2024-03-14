@@ -351,7 +351,6 @@ impl Cpu {
     }
 
     fn halt(&mut self) -> u8 {
-        // TODO
         self.halt_triggered = true;
         self.halted = true;
         1

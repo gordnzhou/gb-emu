@@ -63,7 +63,7 @@ impl Cartridge {
     }
 
     pub fn get_title(&self) -> String {
-        self.header.title().replace("\0", "")
+        self.header.title()
     }
 
     /// Writes to BANK register, which unmaps the boot ROM.
@@ -83,13 +83,17 @@ impl Cartridge {
 
         Ok(rom_data)
     }
-
+    
     pub fn read_rom(&self, addr: usize) -> u8 {
         if addr < BOOTROM_SIZE && self.bank == 0 {
             self.bootrom[addr]
         } else {
             self.mbc.read_rom(addr)
         }
+    }
+
+    pub fn save_ram(&self) {
+        self.mbc.save_ram();
     }
 
     pub fn write_rom(&mut self, addr: usize, byte: u8) {

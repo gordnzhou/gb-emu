@@ -61,8 +61,8 @@ impl Sweep {
         };
 
         if next_period > 0x7FF {
-            Some(next_period)
-        } else { None }
+            None
+        } else { Some(next_period) }
     }
     
     /// Returns false if sweep iteration results in channel being disabled

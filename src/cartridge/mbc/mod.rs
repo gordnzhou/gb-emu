@@ -20,6 +20,7 @@ pub trait Mbc {
     fn read_ram(&self, addr: usize) -> u8;
     fn write_ram(&mut self, addr: usize, byte: u8);
     fn display(&self) -> String;
+    fn save_ram(&self);
 }
 
 pub fn make_mbc(rom_path: &str, header: &Header) -> Box<dyn Mbc> {

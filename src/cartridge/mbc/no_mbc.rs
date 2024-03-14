@@ -27,6 +27,10 @@ impl Mbc for NoMbc {
     fn display(&self) -> String {
         String::from("No Mbc")
     }
+
+    fn save_ram(&self) {
+        // do nothing
+    }
 }
 
 impl NoMbc {

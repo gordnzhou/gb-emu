@@ -158,7 +158,7 @@ impl Ppu {
                     1
                 } else {
                     // HBlank -> OAM Search
-                    self.wy_cond |= self.wy == self.ly;
+                    self.wy_cond |= self.wy <= self.ly;
                     self.win_counter += (self.win_enabled() && self.wy_cond && self.wx_cond) as usize;
                     2
                 }
@@ -211,7 +211,7 @@ impl Ppu {
             let mut pixels_left = dots;
 
             while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
-                self.wx_cond |= self.wx as usize == self.cur_pixel_x + 7;
+                self.wx_cond |= self.wx as usize <= self.cur_pixel_x + 7;
 
                 // future TODO: implement BG and OAM FIFO 
                 let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize;
@@ -391,7 +391,11 @@ impl Ppu {
     }
 
     fn win_enabled(&self) -> bool {
-        self.lcdc & 0x20 != 0 && self.lcdc & 0x01 != 0
+        if self.lcdc & 0x01 == 0 {
+            false
+        } else {
+            self.lcdc & 0x20 != 0
+        }
     }
 
     fn obj_enabled(&self) -> bool {
