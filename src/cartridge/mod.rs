@@ -1,30 +1,27 @@
 mod mbc;
 mod header;
+mod battery;
 
 use std::fs::File;
 use std::io::{self, Read};
 
 use self::header::Header;
+use self::mbc::Mbc;
 
 const BOOTROM_PATH: &str = "roms/bootrom.gb";
-
-const ROM_SIZE: usize = 0x8000;
-const ERAM_SIZE: usize = 0x2000;
 const BOOTROM_SIZE: usize = 0x100;
 
 pub struct Cartridge {
-    rom: [u8; ROM_SIZE],
-    eram: [u8; ERAM_SIZE],
     bootrom: [u8; BOOTROM_SIZE],
     bank: u8,
     header: Header,
     with_bootrom: bool,
+    mbc: Box<dyn Mbc>,
 }
 
-// TODO: add MBC support
 impl Cartridge {
+    /// Loads cartridge from the given file path (and optionally runs it with boot ROM).
     pub fn from_file(rom_path: &str, with_bootrom: bool) -> Self {
-        let mut rom = [0; ROM_SIZE];
         let mut bootrom = [0; BOOTROM_SIZE];
         let mut bank = 1;
         
@@ -37,30 +34,27 @@ impl Cartridge {
                     }
                 }
                 Err(err) => {
-                    eprintln!("Error reading ROM file at {}: {}", rom_path, err);
+                    eprintln!("Error reading bootrom file from {}: {}", BOOTROM_PATH, err);
                 }
             }
         }
 
-        // TODO: change this to support larger files
-        match Cartridge::read_from_file(rom_path) {
-            Ok(rom_data) => {
-                for i in 0..rom_data.len() {
-                    rom[i] = rom_data[i];
-                }
-            }
+        let header = match Header::from_file(rom_path) {
+            Ok(header) => header,
             Err(err) => {
-                eprintln!("Error reading ROM file at {}: {}", rom_path, err);
+                panic!("Error reading header from {}: {}", rom_path, err);
             }
-        }
+        };
+
+        let mbc = mbc::make_mbc(rom_path, &header);
+        println!("Detected MBC: {}", mbc.display());
 
         Cartridge { 
-            rom,
-            eram: [0; ERAM_SIZE],
             bootrom,
             bank,
-            header: Header::from_bytes(rom[0x0100..0x0150].try_into().unwrap()),
+            header,
             with_bootrom,
+            mbc,
         }
     }
 
@@ -69,7 +63,7 @@ impl Cartridge {
     }
 
     pub fn get_title(&self) -> String {
-        self.header.title.clone().replace("\0", "")
+        self.header.title().replace("\0", "")
     }
 
     /// Writes to BANK register, which unmaps the boot ROM.
@@ -81,7 +75,7 @@ impl Cartridge {
         self.bank
     }
 
-    fn read_from_file(file_path: &str) -> io::Result<Vec<u8>> {
+    pub fn read_from_file(file_path: &str) -> io::Result<Vec<u8>> {
         let mut file = File::open(file_path)?;
 
         let mut rom_data = Vec::new();
@@ -94,11 +88,19 @@ impl Cartridge {
         if addr < BOOTROM_SIZE && self.bank == 0 {
             self.bootrom[addr]
         } else {
-            self.rom[addr]
+            self.mbc.read_rom(addr)
         }
     }
 
-    pub fn read_eram(&self, addr: usize) -> u8 {
-        self.eram[addr - 0xA000]
+    pub fn write_rom(&mut self, addr: usize, byte: u8) {
+        self.mbc.write_rom(addr, byte);
+    }
+
+    pub fn read_ram(&self, addr: usize) -> u8 {
+        self.mbc.read_ram(addr)
+    }
+
+    pub fn write_ram(&mut self, addr: usize, byte: u8) {
+        self.mbc.write_ram(addr, byte);
     }
 }

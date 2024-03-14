@@ -15,7 +15,7 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/drmario.gb";
+const ROM_PATH: &str = "roms/zelda.gb";
 
 const SCREEN_SCALE: i32 = 3;
 
@@ -32,7 +32,7 @@ fn clear_log_file() -> std::io::Result<()> {
 
 fn main() -> Result<(), String> {
 
-    let cartridge = Cartridge::from_file(ROM_PATH, false);
+    let cartridge = Cartridge::from_file(ROM_PATH, true);
     let mut emulator = Emulator::new(SCREEN_SCALE, cartridge)?;
     emulator.debug_run(40e12 as u64);
 

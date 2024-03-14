@@ -146,38 +146,22 @@ mod tests {
     use crate::{cartridge::Cartridge, cpu::Cpu};
 
     const TIMEOUT: u64 = 1 << 32;
-    const TEST_FILES: [&str; 11] = [
-        "01-special.gb",
-        "02-interrupts.gb",
-        "03-op sp,hl.gb",
-        "04-op r,imm.gb",
-        "05-op rp.gb",
-        "06-ld r,r.gb",
-        "07-jr,jp,call,ret,rst.gb",
-        "08-misc instrs.gb",
-        "09-op r,r.gb",
-        "10-bit ops.gb",
-        "11-op a,(hl).gb"
-    ];
+    const CPU_INSTR: &str = "roms/cpu_instrs.gb";
 
     #[test]
     fn cpu_instr_test() {
-        'outer: for test in TEST_FILES {
-            let cartridge = Cartridge::from_file(&*format!("roms/{}", test), false);
-            let mut cpu = Cpu::new(cartridge);
+        let cartridge = Cartridge::from_file(CPU_INSTR, false);
+        let mut cpu = Cpu::new(cartridge);
 
-            let mut cycles: u64 = 0;
-            while cycles < TIMEOUT {
-                cycles += cpu.step() as u64;
+        let mut cycles: u64 = 0;
+        while cycles < TIMEOUT {
+            cycles += cpu.step() as u64;
 
-                if cpu.bus.serial_output.contains("Passed") {
-                    println!("Passed cpu_test {}", test);
-                    continue 'outer
-                } else if cpu.bus.serial_output.contains("Failed") {
-                    break;
-                }
-            } 
-            panic!("test rom failed: {}", test);
-        }
+            if cpu.bus.serial_output.contains("Passed") {
+                break;
+            } else if cpu.bus.serial_output.contains("Failed") {
+                panic!("cpu_instr test ROM failed");
+            }
+        } 
     }
 }

@@ -9,7 +9,23 @@ use crate::cpu::Interrupt;
 
 const WRAM_SIZE: usize = 0x2000;
 const HRAM_SIZE: usize = 0x0080;
-// const TOTAL_SIZE: usize = 0x10000;
+
+pub const ROM_START: usize = 0x0000;
+pub const ROM_END: usize = 0x7FFF;
+const VRAM_START: usize = 0x8000;
+const VRAM_END: usize = 0x9FFF;
+pub const RAM_START: usize = 0xA000;
+pub const RAM_END: usize = 0xBFFF;
+const WRAM_START: usize = 0xC000;
+const WRAM_END: usize = 0xDFFF;
+const WRAM2_START: usize = 0xE000;
+const WRAM2_END: usize = 0xFDFF;
+const OAM_START: usize = 0xFE00;
+const OAM_END: usize = 0xFE9F;
+const EMPTY_START: usize = 0xFEA0;
+const EMPTY_END: usize = 0xFEFF;
+const HRAM_START: usize = 0xFF80;
+const HRAM_END: usize = 0xFFFE;
 
 pub struct Bus {
     pub cartridge: Cartridge,
@@ -49,14 +65,14 @@ impl Bus {
 
     /// Steps through APU, PPU and Timer, and updates interrupt flag(s).
     pub fn step(&mut self, cycles: u8) {
-        self.ppu.step(cycles);
-
         let old_div = self.timer.div;
         if self.timer.step(cycles) {
             self.request_interrupt(Interrupt::Timer)
         }
 
         self.apu.step(cycles as u32, old_div & 0x10 != 0 && self.timer.div & 0x10 == 0);
+
+        self.ppu.step(cycles);
 
         if self.ppu.entered_vblank {
             self.request_interrupt(Interrupt::VBlank);
@@ -74,13 +90,13 @@ impl Bus {
         let addr = addr as usize;
 
         match addr {
-            0x0000..=0x7FFF => self.cartridge.read_rom(addr),
-            0x8000..=0x9FFF => self.ppu.read_vram(addr),
-            0xA000..=0xBFFF => self.cartridge.read_eram(addr),
-            0xC000..=0xDFFF => self.wram[addr - 0xC000],
-            0xE000..=0xFDFF => self.wram[addr - 0xE000],
-            0xFE00..=0xFE9F => self.ppu.read_oam(addr),
-            0xFEA0..=0xFEFF => 0xFF,
+            ROM_START..=ROM_END     => self.cartridge.read_rom(addr),
+            VRAM_START..=VRAM_END   => self.ppu.read_vram(addr),
+            RAM_START..=RAM_END     => self.cartridge.read_ram(addr),
+            WRAM_START..=WRAM_END   => self.wram[addr - WRAM_START],
+            WRAM2_START..=WRAM2_END => self.wram[addr - WRAM2_START],
+            OAM_START..=OAM_END     => self.ppu.read_oam(addr),
+            EMPTY_START..=EMPTY_END => 0xFF,
 
             // IO Registers
             0xFF00          => self.joypad.read_joypad(),
@@ -91,7 +107,7 @@ impl Bus {
             0xFF40..=0xFF4B => self.ppu.read_io(addr),
             0xFF50          => self.cartridge.read_bank(),
         
-            0xFF80..=0xFFFE => self.hram[addr - 0xFF80],
+            HRAM_START..=HRAM_END => self.hram[addr - HRAM_START],
             0xFFFF          => self.interrupt_enable,
             _               => 0xFF
         }
@@ -102,13 +118,13 @@ impl Bus {
         let addr = addr as usize;
 
         match addr {
-            0x0000..=0x7FFF => {},
-            0x8000..=0x9FFF => self.ppu.write_vram(addr, byte),
-            0xA000..=0xBFFF => {},
-            0xC000..=0xDFFF => self.wram[addr - 0xC000] = byte,
-            0xE000..=0xFDFF => self.wram[addr - 0xE000] = byte,
-            0xFE00..=0xFE9F => self.ppu.write_oam(addr, byte),
-            0xFEA0..=0xFEFF => {},
+            ROM_START..=ROM_END     => self.cartridge.write_rom(addr, byte),
+            VRAM_START..=VRAM_END   => self.ppu.write_vram(addr, byte),
+            RAM_START..=RAM_END     => self.cartridge.write_ram(addr, byte),
+            WRAM_START..=WRAM_END   => self.wram[addr - WRAM_START] = byte,
+            WRAM2_START..=WRAM2_END => self.wram[addr - WRAM2_START] = byte,
+            OAM_START..=OAM_END     => self.ppu.write_oam(addr, byte),
+            EMPTY_START..=EMPTY_END => {},
 
             // IO Registers
             0xFF00          => self.joypad.write_joypad(byte),
@@ -120,7 +136,7 @@ impl Bus {
             0xFF40..=0xFF4B => self.ppu_write(addr, byte),
             0xFF50          => self.cartridge.write_bank(byte),
 
-            0xFF80..=0xFFFE => self.hram[addr - 0xFF80] = byte,
+            HRAM_START..=HRAM_END => self.hram[addr - HRAM_START] = byte,
             0xFFFF          => self.interrupt_enable = byte,
             _               => {},
         }

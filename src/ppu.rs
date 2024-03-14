@@ -375,7 +375,7 @@ impl Ppu {
                 self.scx 
             };
             
-            res += 11 - min(5, (x + offset) % 8) as u32;
+            res += 11 - min(5, (x as u16 + offset as u16) % 8) as u32;
         }
 
         res
