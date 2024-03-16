@@ -1,11 +1,9 @@
-use std::cmp::{max, min};
-
 use crate::bus::RAM_START;
 use crate::cartridge::battery::Battery;
 
 use super::{Mbc, RAM_BANK_SIZE, ROM_BANK_SIZE};
 
-pub struct Mbc1 {
+pub struct Mbc5 {
     rom: Vec<[u8; ROM_BANK_SIZE]>,
     rom_banks: usize,
     ram: Option<Vec<[u8; RAM_BANK_SIZE]>>,
@@ -14,10 +12,10 @@ pub struct Mbc1 {
     current_rom_bank: usize,
     current_ram_bank: usize,
     ram_enabled: bool,
-    banking_mode: bool,
+    rumble: bool,
 }
 
-impl Mbc1 {
+impl Mbc5 {
     pub fn new(rom_path: &str, rom_banks: usize) -> Self {
         let rom = match super::read_rom_from_file(rom_path, rom_banks) {
             Ok(rom) => rom,
@@ -26,7 +24,7 @@ impl Mbc1 {
             }
         };
         
-        Mbc1 {
+        Mbc5 {
             rom,
             rom_banks,
             ram: None,
@@ -35,8 +33,14 @@ impl Mbc1 {
             current_rom_bank: 1,
             current_ram_bank: 0,
             ram_enabled: false,
-            banking_mode: false,
+            rumble: false,
         }
+    }
+
+    pub fn with_rumble(mut self) -> Self {
+        // Can't think of a way to implement this???
+        self.rumble = true;
+        self
     }
 
     /// Specifies RAM (sets ram to not None).
@@ -59,17 +63,11 @@ impl Mbc1 {
     }
 }
 
-impl Mbc for Mbc1 {
+impl Mbc for Mbc5 {
     fn read_rom(&self, addr: usize) -> u8 {
         match addr {
             0x0000..=0x3FFF => self.rom[0][addr],
-            0x4000..=0x7FFF => {
-                let bank = match self.current_rom_bank {
-                    0x00 | 0x20 | 0x40 | 0x60 => self.current_rom_bank + 1,
-                    _ => self.current_rom_bank
-                };
-                self.rom[bank][addr - 0x4000]
-            }
+            0x4000..=0x7FFF => self.rom[self.current_rom_bank][addr - 0x4000],
             _ => unreachable!()
         }
     }
@@ -77,25 +75,14 @@ impl Mbc for Mbc1 {
     fn write_rom(&mut self, addr: usize, byte: u8) {
         match addr {
             0x0000..=0x1FFF => self.ram_enabled = (byte & 0xF) == 0xA,
-            0x2000..=0x3FFF => {
-                let mask = min(self.rom_banks as u8 - 1, 0b11111);
-                self.current_rom_bank = max((byte & mask) as usize, 1)
-            },
+            0x2000..=0x2FFF => self.current_rom_bank = byte as usize,
+            0x3000..=0x3FFF => self.current_rom_bank |= (byte as usize & 1) << 8,
             0x4000..=0x5FFF => {
-                if !self.banking_mode {
-                    if self.ram_banks == 4 {
-                        self.current_ram_bank = (byte & 3) as usize;
-                    }
-                } else {
-                    if self.rom_banks >= 64 {
-                        self.current_rom_bank = ((byte & 3) << 5) as usize | (self.current_rom_bank & 0x1F);
-                    }
+                if (byte as usize) < self.ram_banks {
+                    self.current_ram_bank = byte as usize;
                 }
             },
-            0x6000..=0x7FFF => if self.ram_banks > 1 && self.rom_banks > 32 {
-                self.banking_mode = byte != 0
-            },
-            _ => unreachable!()
+            _ => {}
         }
     }
 
@@ -103,11 +90,8 @@ impl Mbc for Mbc1 {
         if !self.ram_enabled {
             return 0xFF;
         }
-
-        let ram_bank = if self.banking_mode { self.current_ram_bank } else { 0 };
-
         match &self.ram {
-            Some(ram) => ram[ram_bank][addr - RAM_START],
+            Some(ram) => ram[self.current_ram_bank][addr - RAM_START],
             None => 0xFF
         }
     }
@@ -116,7 +100,6 @@ impl Mbc for Mbc1 {
         if !self.ram_enabled {
             return;
         }
-
         match &mut self.ram {
             Some(ram) => ram[self.current_ram_bank][addr - RAM_START] = byte,
             None => {}
@@ -124,7 +107,10 @@ impl Mbc for Mbc1 {
     }
 
     fn display(&self) -> String {
-        let mut ret = format!("Mbc1 w/ {} ROM banks", self.rom_banks);
+        let mut ret = format!("Mbc5 w/ {} ROM banks", self.rom_banks);
+        if self.rumble {
+            ret.push_str(&format!(" + Rumble (not supported)"));
+        }
         if self.ram.is_some() {
             ret.push_str(&format!(" + {} RAM banks", self.ram_banks));
         }

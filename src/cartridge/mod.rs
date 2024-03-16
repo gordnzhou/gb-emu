@@ -1,6 +1,7 @@
 mod mbc;
 mod header;
 mod battery;
+mod rtc;
 
 use std::fs::File;
 use std::io::{self, Read};
@@ -92,8 +93,8 @@ impl Cartridge {
         }
     }
 
-    pub fn save_ram(&self) {
-        self.mbc.save_ram();
+    pub fn save_mbc_state(&self) {
+        self.mbc.save_state();
     }
 
     pub fn write_rom(&mut self, addr: usize, byte: u8) {

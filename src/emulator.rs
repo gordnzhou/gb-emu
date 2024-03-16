@@ -126,7 +126,7 @@ impl Emulator {
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    self.cpu.bus.cartridge.save_ram();
+                    self.cpu.bus.cartridge.save_mbc_state();
                     return Err("User Exited");
                 },
                 Event::KeyDown { keycode: Some(key), ..} => {   

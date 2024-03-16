@@ -15,9 +15,9 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/zelda.gb";
+const ROM_PATH: &str = "roms/pokemonyellow.gbc";
 
-const SCREEN_SCALE: i32 = 3;
+const SCREEN_SCALE: i32 = 5;
 
 // FOR TESTING
 #[allow(dead_code)]

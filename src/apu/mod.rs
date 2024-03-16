@@ -142,9 +142,14 @@ impl Apu {
             let pulse2_sample = self.pulse2.make_sample();
             let wave_sample = self.wave.make_sample();
             let noise_sample = self.noise.make_sample();
+
+            // let pulse1_sample = 0.0;
+            // let pulse2_sample = 0.0;
+            // let wave_sample = 0.0;
+            // let noise_sample = 0.0;
             
             // TODO: TEMPORARY FIX FOR BUFFER UNDERRUNS
-            if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) - 1 {
+            if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
                 self.sample_gather = 0;
 
                 let mut right_sample = 0.0;

@@ -52,7 +52,7 @@ impl Pulse1{
             return 0.0;
         }
 
-        if self.freq_counter >= self.period_value() {
+        if self.freq_counter >= 2048 - self.period_value() {
             self.freq_counter = 0;
             self.duty_index = (self.duty_index + 1) % DUTY_SAMPLE_SIZE;
         }
@@ -138,15 +138,12 @@ impl Pulse1{
     }
 
     fn write_nr13(&mut self, byte: u8) {
-        self.sweep.cur_period = self.period_value();
         self.nr13 = byte;
+        self.sweep.cur_freq_period = self.period_value();
     }
 
     fn write_nr14(&mut self, byte: u8) {
-        self.nr14 = byte;
-        self.sweep.cur_period = self.period_value();
-
-        if self.nr14 & 0x80 != 0 {
+        if byte & 0x80 != 0 {
             self.channel_on = true;
             self.duty_index = 0;
             self.envelope.on_trigger();
@@ -155,10 +152,12 @@ impl Pulse1{
         }
 
         self.length_counter.enabled = byte & 0x40 != 0;
+        self.nr14 = byte;
+        self.sweep.cur_freq_period = self.period_value();
     }
 
     fn period_value(&self) -> u32 {
-        MAX_PERIOD - ((self.nr14 as u32 & 7) << 8 | self.nr13 as u32)
+        (self.nr14 as u32 & 7) << 8 | self.nr13 as u32
     }
 }
 

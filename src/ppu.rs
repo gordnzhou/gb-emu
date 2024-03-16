@@ -55,6 +55,7 @@ pub struct Ppu {
     cur_pixel_x: usize,
     wy_cond: bool,
     wx_cond: bool,
+    line_has_window: bool,
     win_counter: usize,
 
     obj_buffer_index: usize,
@@ -95,6 +96,7 @@ impl Ppu {
             cur_pixel_x: 0,
             wy_cond: false,
             wx_cond: false,
+            line_has_window: false,
             win_counter: 0,
 
             obj_buffer_index: 0,
@@ -159,7 +161,8 @@ impl Ppu {
                 } else {
                     // HBlank -> OAM Search
                     self.wy_cond |= self.wy <= self.ly;
-                    self.win_counter += (self.win_enabled() && self.wy_cond && self.wx_cond) as usize;
+                    self.win_counter += self.line_has_window as usize;
+                    self.line_has_window = false;
                     2
                 }
             },
@@ -237,20 +240,21 @@ impl Ppu {
         self.update_stat();
     }
 
-    fn render_pixel(&self, lcd_x: usize, lcd_y: usize) -> u8 {
+    fn render_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> u8 {
         let mut colour = self.render_bgwin_pixel(lcd_x, lcd_y);
         colour = self.render_obj_pixel(colour, lcd_x, lcd_y);
         colour
     }
 
-    fn render_bgwin_pixel(&self, lcd_x: usize, lcd_y: usize) -> u8 {
+    fn render_bgwin_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> u8 {
         if self.obj_only() {
             return 0;
         }
 
         let tile_data =  if self.win_enabled() && self.wy_cond && self.wx_cond {
+            self.line_has_window = true;
             let x = lcd_x + 7 - self.wx as usize;
-            let y = self.win_counter - 1;
+            let y = self.win_counter;
             self.fetch_bgwin_tile(x, y, false)
         } else {
             let x = (lcd_x + self.scx as usize) % 0xFF;
