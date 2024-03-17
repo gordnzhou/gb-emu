@@ -15,7 +15,7 @@ use emulator::Emulator;
 use std::io::Write;
 use std::fs::OpenOptions;
 
-const ROM_PATH: &str = "roms/pokemonyellow.gbc";
+const ROM_PATH: &str = "roms/01-read_timing.gb";
 
 const SCREEN_SCALE: i32 = 5;
 

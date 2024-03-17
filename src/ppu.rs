@@ -25,6 +25,14 @@ pub const COLORS: [[u8; 4]; 4] = [
     [0x0F, 0x38, 0x0F, 0xFF], // #0F380F => black
 ];
 
+#[derive(PartialEq)]
+enum Mode {
+    HBlank0, 
+    VBlank1,
+    OamScan2,
+    Drawing3
+}
+
 pub struct Ppu {
     tile_data: [[u8; TILE_SIZE]; TILE_ENTRIES],
     tile_map0: [u8; TILE_MAP_SIZE],
@@ -48,7 +56,7 @@ pub struct Ppu {
     pub frame_buffer: [u8; LCD_WIDTH * LCD_HEIGHT * 4],
     pub stat_triggered: bool,
     stat_line: bool,
-    mode: u8,
+    mode: Mode,
     mode_elapsed_dots: u32,
 
     mode_3_dots: u32,
@@ -89,7 +97,7 @@ impl Ppu {
             stat_triggered: false,
             stat_line: false,
 
-            mode: 2,
+            mode: Mode::VBlank1,
             mode_elapsed_dots: 0,
 
             mode_3_dots: 0,
@@ -111,20 +119,15 @@ impl Ppu {
     pub fn step(&mut self, cycles: u8) {
         self.entered_vblank = false;
         self.stat_triggered = false;
-
-        if self.lcd_ppu_disabled() {
-            return;
-        }
+        if self.lcd_ppu_disabled() { return; }
 
         let dots = cycles as u32 * 4;
         let next_dots = self.mode_elapsed_dots + dots;
-
         let mode_end = match self.mode {
-            0 => SCAN_LINE_DOTS - self.mode_3_dots - MODE_2_DOTS,
-            1 => MODE_1_DOTS,
-            2 => MODE_2_DOTS,
-            3 => self.mode_3_dots,
-            _ => unreachable!()
+            Mode::HBlank0 => SCAN_LINE_DOTS - self.mode_3_dots - MODE_2_DOTS,
+            Mode::VBlank1 => MODE_1_DOTS,
+            Mode::OamScan2 => MODE_2_DOTS,
+            Mode::Drawing3 => self.mode_3_dots,
         };
 
         if next_dots < mode_end {
@@ -141,100 +144,93 @@ impl Ppu {
         }
     }
 
-    // Updates PPU to next natural mode state.
+    // Updates PPU to next mode state.
     fn next_mode(&mut self) {
         self.mode = match self.mode {
-            0 => {
+            Mode::HBlank0 => {
                 self.cur_pixel_x = 0;
                 self.obj_buffer = Vec::new();
                 self.obj_buffer_index = 0;
-                self.ly += 1; 
+                self.ly += 1;
 
                 if self.ly == LCD_HEIGHT as u8 {
-                    // HBlank -> VBlank
                     self.wy_cond = false;
                     self.win_counter = 0;
                     self.entered_vblank = true;
                     self.last_vblank_scanline = 0;
-
-                    1
-                } else {
-                    // HBlank -> OAM Search
-                    self.wy_cond |= self.wy <= self.ly;
+                    Mode::VBlank1
+                } else {        
                     self.win_counter += self.line_has_window as usize;
                     self.line_has_window = false;
-                    2
+                    Mode::OamScan2
                 }
             },
-            1 => {
-                // VBlank -> OAM Search
+            Mode::VBlank1 => {
                 self.ly = 0;
-                2 
+                Mode::OamScan2
             },
-            2 => {
-                // OAM Search -> Drawing
+            Mode::OamScan2 => {
+                self.wx_cond = false;
                 self.obj_buffer_index = 0;
                 self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
-                self.wx_cond = false;
                 self.mode_3_dots = self.calc_mode_3_dots();
-                3
+                Mode::Drawing3
             },
-            3 => {
-                // Drawing -> HBlank
-                0
-            },
-            _ => unreachable!()
+            Mode::Drawing3 => Mode::HBlank0,
         };
     }
 
     /// ASSUME: self.mode_elapsed_dots + dots will NOT exceed duration of current mode.
     /// Step through period (in dots) over the current mode (do nothing for mode 1 and 0).
     fn step_mode(&mut self, dots: u32) {
-        if dots == 0 {
-            return;
-        }
+        if dots == 0 { return; }
 
-        if self.mode == 2 {
-            // check an attribute from OAM every 2 dots
-            let mut fetches = (dots + 1) / 2;
-
-            while fetches > 0 && self.obj_buffer_index < OAM_ENTRIES && self.obj_buffer.len() < 10 {
-                let obj_y = self.oam[self.obj_buffer_index][0];
-                
-                if self.ly + 16 >= obj_y && self.ly + 16 < obj_y + self.obj_size()  {
-                    self.obj_buffer.push(self.obj_buffer_index);
+        match self.mode {
+            Mode::VBlank1 => {
+                if self.last_vblank_scanline + dots >= SCAN_LINE_DOTS {
+                    self.ly += 1;
                 }
+                self.last_vblank_scanline = (self.last_vblank_scanline + dots) % SCAN_LINE_DOTS;
 
-                self.obj_buffer_index += 1;
-                fetches -= 1;
-            }
-
-        } else if self.mode == 3 {
-            // draw 
-            let mut pixels_left = dots;
-
-            while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
-                self.wx_cond |= self.wx as usize <= self.cur_pixel_x + 7;
-
-                // future TODO: implement BG and OAM FIFO 
-                let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize;
-                
-                for i in 0..=3 {
-                    self.frame_buffer[usize::from(self.ly as usize) * LCD_BYTE_WIDTH
-                        + usize::from(self.cur_pixel_x) * BYTES_PER_PIXEL
-                        + i] = COLORS[colour][i];
+                if self.ly == 153 && self.last_vblank_scanline >= 4 {
+                    self.ly = 0;
                 }
-                
-                self.cur_pixel_x += 1;
-                pixels_left -= 1;
             }
-
-        }  else if self.mode == 1 {
-            if self.last_vblank_scanline + dots >= SCAN_LINE_DOTS {
-                self.ly += 1;
+            Mode::OamScan2 => {
+                let mut fetches = (dots + 1) / 2;
+                while fetches > 0 && self.obj_buffer_index < OAM_ENTRIES && self.obj_buffer.len() < 10 {
+                    let obj_y = self.oam[self.obj_buffer_index][0];   
+                    if self.ly + 16 >= obj_y && self.ly + 16 < obj_y + self.obj_size()  {
+                        self.obj_buffer.push(self.obj_buffer_index);
+                    }
+                    self.obj_buffer_index += 1;
+                    fetches -= 1;
+                }
             }
-            self.last_vblank_scanline = (self.last_vblank_scanline + dots) % SCAN_LINE_DOTS;
+            Mode::Drawing3 => {
+                let mut pixels_left = dots;
 
+                while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
+                    self.wy_cond |= self.wy == self.ly;
+                    self.wx_cond |= if self.wx < 7 {
+                        self.wx as usize <= self.cur_pixel_x + 7
+                    } else {
+                        self.wx as usize - 7 == self.cur_pixel_x
+                    };
+
+                    // future TODO: implement BG and OAM FIFO 
+                    let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize; 
+                    for i in 0..=3 {
+                        self.frame_buffer[usize::from(self.ly as usize) * LCD_BYTE_WIDTH
+                            + usize::from(self.cur_pixel_x) * BYTES_PER_PIXEL
+                            + i] = COLORS[colour][i];
+                    }
+                    
+                    self.cur_pixel_x += 1;
+                    pixels_left -= 1;
+                }
+            }
+            _ => {}
         }
 
         self.update_stat();
@@ -251,7 +247,7 @@ impl Ppu {
             return 0;
         }
 
-        let tile_data =  if self.win_enabled() && self.wy_cond && self.wx_cond {
+        let tile_data =  if self.win_enabled() && self.wx_cond && self.wy_cond {
             self.line_has_window = true;
             let x = lcd_x + 7 - self.wx as usize;
             let y = self.win_counter;
@@ -346,7 +342,7 @@ impl Ppu {
     /// updates STAT register and updates stat line
     fn update_stat(&mut self) {
         let stat = self.stat & 0xFC;
-        self.stat = stat | self.mode;
+        self.stat = stat | Ppu::mode_to_num(&self.mode);
         
         if self.lyc == self.ly {
             self.stat |= 0x04;
@@ -357,37 +353,11 @@ impl Ppu {
         let old_stat_line = self.stat_line;
 
         self.stat_line = (self.lyc == self.ly && self.stat & 0x40 != 0) |
-                         (self.mode == 0      && self.stat & 0x20 != 0) |
-                         (self.mode == 1      && self.stat & 0x10 != 0) |
-                         (self.mode == 2      && self.stat & 0x08 != 0);
+            (self.mode == Mode::HBlank0 && self.stat & 0x20 != 0) |
+            (self.mode == Mode::VBlank1 && self.stat & 0x10 != 0) |
+            (self.mode == Mode::OamScan2 && self.stat & 0x08 != 0);
 
         self.stat_triggered = !old_stat_line && self.stat_line
-    }
-
-    fn calc_mode_3_dots(&self) -> u32 {
-        let mut res = MODE_3_MIN_DOTS + (self.scx % 8) as u32;
-
-        if self.win_enabled() && self.wy_cond {
-            res += 6;
-        }
-
-        for i in &self.obj_buffer {
-            let x = self.oam[*i][1];
-            let offset = if self.win_enabled() && self.wy_cond && x + 7 <= self.wx { 
-                0xFF - self.wx 
-            } else { 
-                self.scx 
-            };
-            
-            res += 11 - min(5, (x as u16 + offset as u16) % 8) as u32;
-        }
-
-        res
-    }
-
-    fn apply_palette(colour_id: &u8, palette: &u8) -> u8 {
-        let id = colour_id << 1;
-        (palette & (0x03 << id)) >> id
     }
 
     fn lcd_ppu_disabled(&self) -> bool {
@@ -446,7 +416,7 @@ impl Ppu {
     }
 
     pub fn read_oam(&self, addr: usize) -> u8 {
-        if (self.mode != 3 && self.mode != 2) || self.lcd_ppu_disabled() {
+        if self.can_access_oam() {
             let index = addr - 0xFE00;
             self.oam[index / OAM_ENTRY_SIZE][index % OAM_ENTRY_SIZE]
         } else { 
@@ -455,19 +425,24 @@ impl Ppu {
     }
 
     pub fn write_oam(&mut self, addr: usize, byte: u8) {
-        if (self.mode != 3 && self.mode != 2) || self.lcd_ppu_disabled() {
+        if self.can_access_oam() {
             let index = addr - 0xFE00;
             self.oam[index / OAM_ENTRY_SIZE][index % OAM_ENTRY_SIZE] = byte;
         }
     }
 
+    fn can_access_oam(&self) -> bool {
+        self.lcd_ppu_disabled() ||
+        (self.mode != Mode::Drawing3 && self.mode != Mode::OamScan2)
+    }
+
     pub fn read_io(&self, addr: usize,) -> u8 {
         match addr {
             0xFF40 => self.lcdc,
-            0xFF41 => self.read_stat(),
+            0xFF41 => if self.lcd_ppu_disabled() { self.stat & 0xFC } else { self.stat },
             0xFF42 => self.scy,
             0xFF43 => self.scx,
-            0xFF44 => self.read_ly(),
+            0xFF44 => if self.lcd_ppu_disabled() { 0 } else { self.ly },
             0xFF45 => self.lyc,
             0xFF46 => self.dma,
             0xFF47 => self.bgp,
@@ -482,8 +457,16 @@ impl Ppu {
     /// Writes to PPU registers; returns true if DMA transfer is triggered.
     pub fn write_io(&mut self, addr: usize, byte: u8) -> bool {
         match addr {
-            0xFF40 => self.write_lcdc(byte),
-            0xFF41 => self.write_stat(byte),
+            0xFF40 => {
+                if self.lcdc & 0x80 == 0 && byte & 0x80 != 0 {
+                    self.reset_lcd();   
+                }
+                self.lcdc = byte; 
+            },
+            0xFF41 => {
+                let stat = self.stat & 0x07;
+                self.stat = (byte & 0xF8) | stat;
+            },
             0xFF42 => self.scy = byte,
             0xFF43 => self.scx = byte,
             0xFF44 => {},
@@ -500,35 +483,40 @@ impl Ppu {
         addr == 0xFF46
     }
 
-    fn write_lcdc(&mut self, byte: u8) {
-        if self.lcdc & 0x80 == 0 && byte & 0x80 != 0 {
-            self.reset_lcd();   
+    fn calc_mode_3_dots(&self) -> u32 {
+        let mut res = MODE_3_MIN_DOTS + (self.scx % 8) as u32;
+
+        if self.win_enabled() && self.wy_cond {
+            res += 6;
         }
-        self.lcdc = byte; 
+
+        for i in &self.obj_buffer {
+            let x = self.oam[*i][1];
+            let offset = if self.win_enabled() && self.wy_cond && x + 7 <= self.wx { 
+                0xFF - self.wx 
+            } else { 
+                self.scx 
+            };
+            
+            res += 11 - min(5, (x as u16 + offset as u16) % 8) as u32;
+        }
+
+        res
     }
 
-    fn read_stat(&self) -> u8 {
-        if self.lcd_ppu_disabled() {
-            self.stat & 0xFC
-        } else {
-            self.stat
-        }
+    fn apply_palette(colour_id: &u8, palette: &u8) -> u8 {
+        let id = colour_id << 1;
+        (palette & (0x03 << id)) >> id
     }
 
-    fn write_stat(&mut self, byte: u8) {
-        // Bottom three bits are read-only.
-        let stat = self.stat & 0x07;
-        self.stat = (byte & 0xF8) | stat;
-    }
-
-    fn read_ly(&self) -> u8 {
-        if self.lcd_ppu_disabled() {
-            0
-        } else {
-            self.ly
+    fn mode_to_num(mode: &Mode) -> u8 {
+        match mode {
+            Mode::HBlank0 => 0,
+            Mode::VBlank1 => 1,
+            Mode::OamScan2 => 2,
+            Mode::Drawing3 => 3,
         }
-    }
-    
+    } 
 }
 
 #[cfg(test)]

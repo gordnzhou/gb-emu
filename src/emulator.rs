@@ -34,8 +34,6 @@ pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
 pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
 const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
 
-use std::time::{Duration, Instant};
-
 pub struct Emulator {
     event_pump: EventPump,
     screen_scale: i32,
@@ -88,9 +86,6 @@ impl Emulator {
     pub fn debug_run(&mut self, total_dur_ns: u64) {
         let mut dur_ns = 0;
 
-        let mut last_instr = Instant::now();
-        let mut cpu_duration_ns: u64 = 0;
-
         let creator = self.canvas.texture_creator();
         let mut texture = creator
             .create_texture_streaming(PixelFormatEnum::ARGB8888, LCD_WIDTH as u32, LCD_HEIGHT as u32)
@@ -101,25 +96,16 @@ impl Emulator {
         let screen_height = LCD_HEIGHT as u32 * self.screen_scale as u32;
         let rect = Rect::new(0, 0, screen_width, screen_height);
 
+        // NOTE: cycle timings is seem to be controlled by APU audio callback 
         while dur_ns < total_dur_ns {
-            if last_instr.elapsed() >= Duration::from_nanos(cpu_duration_ns) {
-                last_instr = Instant::now();
-                let cycles = self.cpu.step();
-                self.cpu.bus.joypad.step(self.key_status);
-                self.next_frame(&mut texture, rect);
+            self.cpu.bus.joypad.step(self.key_status);
+            let cycles = self.cpu.step();
+            self.next_frame(&mut texture, rect);
 
-                cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
-                dur_ns += cpu_duration_ns;
-            }
+            let cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
+            dur_ns += cpu_duration_ns;
         } 
     }
-
-    // fn play_audio(&mut self) {
-    //     if self.cpu.bus.apu.buffer_index >= AUDIO_SAMPLES {
-    //         self.audio_device.queue_audio(&self.cpu.bus.apu.audio_buffer).unwrap();
-    //         self.cpu.bus.apu.buffer_index = 0;
-    //     }
-    // }
 
     fn get_events(&mut self) -> Result<(), &str> { 
         for event in self.event_pump.poll_iter() {

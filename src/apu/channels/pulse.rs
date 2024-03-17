@@ -64,24 +64,12 @@ impl Pulse1{
         Apu::to_analog(sample * self.envelope.cur_volume)
     }
 
-    pub fn step(&mut self, length_step: bool, envelope_step: bool, sweep_step: bool) {
-        if !self.channel_on {
-            return;
+    pub fn step(&mut self, div_apu_tick: bool) {
+        if self.length_counter.tick(div_apu_tick as u8) {
+            self.channel_on = false;
         }
-
-        if envelope_step {
-            self.envelope.step();
-        }
-
-        if sweep_step {
-            self.channel_on = self.sweep.step(&mut self.nr13, &mut self.nr14);
-        }
-
-        if length_step {
-            if self.length_counter.tick() {
-                self.channel_on = false;
-            }
-        }
+        self.envelope.step(div_apu_tick as u8);
+        self.channel_on &= self.sweep.step(div_apu_tick as u8,&mut self.nr13, &mut self.nr14);
     }
 
     pub fn channel_on(&self) -> bool {
@@ -119,7 +107,7 @@ impl Pulse1{
 
     fn write_nr11(&mut self, byte: u8) {
         self.nr11 = byte;
-        self.length_counter.ticks = (byte & 0x3F) as u32;
+        self.length_counter.set_ticks((byte & 0x3F) as u32);
     }
 
     fn write_nr12(&mut self, byte: u8) {
@@ -143,15 +131,19 @@ impl Pulse1{
     }
 
     fn write_nr14(&mut self, byte: u8) {
-        if byte & 0x80 != 0 {
-            self.channel_on = true;
+        let new_length_enabled = byte & 0x40 != 0;
+        if self.nr14 & 0x80 != 0 {
+            if self.dac_on {
+                self.channel_on = true;
+                self.length_counter.on_trigger();
+            }
             self.duty_index = 0;
             self.envelope.on_trigger();
             self.sweep.on_trigger();
-            self.length_counter.on_trigger();
+            self.freq_counter = 0;
         }
-
-        self.length_counter.enabled = byte & 0x40 != 0;
+        self.channel_on &= self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.enabled = new_length_enabled;
         self.nr14 = byte;
         self.sweep.cur_freq_period = self.period_value();
     }
@@ -211,21 +203,12 @@ impl Pulse2 {
         Apu::to_analog(sample * self.envelope.cur_volume)
     }
 
-    pub fn step(&mut self, length_step: bool, envelope_step: bool) {
-        if !self.channel_on {
-            return;
+    pub fn step(&mut self, div_apu_tick: bool) {
+        if self.length_counter.tick(div_apu_tick as u8) {
+            self.channel_on = false;
         }
-
-        if envelope_step {
-            self.envelope.step();
-        }
-
-        if length_step {
-            if self.length_counter.tick() {
-                self.channel_on = false;
-            }
-        }
-
+        
+        self.envelope.step(div_apu_tick as u8);
         self.freq_period = self.period_value();
     }
 
@@ -255,7 +238,7 @@ impl Pulse2 {
 
     fn write_nr21(&mut self, byte: u8) {
         self.nr21 = byte;
-        self.length_counter.ticks = (byte & 0x3F) as u32;
+        self.length_counter.set_ticks((byte & 0x3F) as u32);
     }
 
     fn write_nr22(&mut self, byte: u8) {
@@ -274,14 +257,18 @@ impl Pulse2 {
     }
 
     fn write_nr24(&mut self, byte: u8) {
-        if byte & 0x80 != 0 {
-            self.channel_on = true;
+        let new_length_enabled = byte & 0x40 != 0;
+        if self.nr24 & 0x80 != 0 {
+            if self.dac_on {
+                self.channel_on = true;
+                self.length_counter.on_trigger();
+            }
             self.duty_index = 0;
             self.envelope.on_trigger();
-            self.length_counter.on_trigger();
+            self.freq_counter = 0;
         }
-
-        self.length_counter.enabled = byte & 0x40 != 0;
+        self.channel_on &= self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.enabled = new_length_enabled;
         self.nr24 = byte;
     }
 

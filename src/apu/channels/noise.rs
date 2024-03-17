@@ -41,20 +41,11 @@ impl Noise {
         Apu::to_analog(sample * self.envelope.cur_volume)
     }
 
-    pub fn step(&mut self, length_step: bool, envelope_step: bool) {
-        if !self.channel_on {
-            return;
+    pub fn step(&mut self, div_apu_tick: bool) {
+        if self.length_counter.tick(div_apu_tick as u8) {
+            self.channel_on = false;
         }
-
-        if envelope_step {
-            self.envelope.step();
-        }
-
-        if length_step {
-            if self.length_counter.tick() {
-                self.channel_on = false;
-            }
-        }
+        self.envelope.step(div_apu_tick as u8);
     }
 
     pub fn channel_on(&self) -> bool {
@@ -109,14 +100,18 @@ impl Noise {
     }
 
     fn write_nr44(&mut self, byte: u8) {
+        let new_length_enabled = byte & 0x40 != 0;
+        println!("{:02x}", byte);
         if byte & 0x80 != 0 {
-            self.channel_on = true;
+            if self.dac_on {
+                self.channel_on = true;
+                self.length_counter.on_trigger();
+            }
             self.envelope.on_trigger();
             self.lfsr.shift_register = 0xFFFF;
-            self.length_counter.on_trigger()
         }
-
-        self.length_counter.enabled = byte & 0x40 != 0;
+        self.channel_on = self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.enabled = new_length_enabled;
         self.nr44 = byte
     }
 }

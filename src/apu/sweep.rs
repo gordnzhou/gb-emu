@@ -1,4 +1,5 @@
 pub struct Sweep {
+    fs_ticks: u8,
     pub cur_freq_period: u32,
     shadow_freq_period: u32,
     pub sweep_period: u32,
@@ -11,6 +12,7 @@ pub struct Sweep {
 impl Sweep {
     pub fn new() -> Self {
         Sweep {
+            fs_ticks: 1,
             cur_freq_period: 0,
             shadow_freq_period: 0,
             sweep_period: 8,
@@ -22,7 +24,11 @@ impl Sweep {
     }
 
     /// Returns false if sweep iteration results in channel being disabled
-    pub fn step(&mut self, nr13: &mut u8, nr14: &mut u8) -> bool {
+    pub fn step(&mut self, div_apu_tick: u8, nr13: &mut u8, nr14: &mut u8) -> bool {
+        self.fs_ticks += div_apu_tick;
+        if self.fs_ticks < 4 { return true; }
+        self.fs_ticks = 0;
+
         if self.sweep_timer > 0 {
             self.sweep_timer -= 1;
         }

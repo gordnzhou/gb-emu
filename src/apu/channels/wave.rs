@@ -38,6 +38,13 @@ impl Wave {
         }
     }
 
+    pub fn reset(&mut self) -> Self {
+        let wave_ram = self.wave_ram;
+        let mut wave = Wave::new();
+        wave.wave_ram = wave_ram;
+        wave
+    }
+
     pub fn make_sample(&mut self) -> f32 {
         if !self.channel_on || !self.dac_on {
             return 0.0;
@@ -60,17 +67,10 @@ impl Wave {
         Apu::to_analog(self.wave_ram[self.sample_index] >> volume)
     }
 
-    pub fn step(&mut self, length_step: bool) {
-        if !self.channel_on {
-            return;
+    pub fn step(&mut self, div_apu_tick: bool) {
+        if self.length_counter.tick(div_apu_tick as u8) {
+            self.channel_on = false;
         }
-
-        if length_step {
-            if self.length_counter.tick() {
-                self.channel_on = false;
-            }
-        }
-        
         self.freq_period = self.period_value();
     }
 
@@ -115,7 +115,7 @@ impl Wave {
 
     fn write_nr31(&mut self, byte: u8) {
         self.nr31 = byte;
-        self.length_counter.ticks = byte as u32;
+        self.length_counter.set_ticks(byte as u32);
     }
 
     fn write_nr30(&mut self, byte: u8) {
@@ -130,12 +130,17 @@ impl Wave {
     }
 
     fn write_nr34(&mut self, byte: u8) {
-        if byte & 0x80 != 0 {
-            self.channel_on = true;
-            self.length_counter.on_trigger();
+        let new_length_enabled = byte & 0x40 != 0;
+        if self.nr34 & 0x80 != 0 {
+            if self.dac_on {
+                self.channel_on = true;
+                self.length_counter.on_trigger();
+            }
+            self.sample_index = 0;
+            self.freq_counter = 0;
         }
-
-        self.length_counter.enabled = byte & 0x40 != 0;
+        self.channel_on = self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.enabled = new_length_enabled;
         self.nr34 = byte
     }
 

@@ -6,6 +6,10 @@ const HEADER_START: usize = 0x100;
 
 const LOGO_BYTES: usize = 0x30;
 
+const CGB_ENHANCED: u8 = 0x80;
+const CGB_ONLY: u8 = 0xC0;
+
+#[derive(Hash)]
 pub struct Header {
     pub nintendo_logo: [u8; LOGO_BYTES],
     pub manufacturer_code: String,
@@ -28,27 +32,27 @@ impl Header {
     pub fn from_file(rom_path: &str) -> io::Result<Self> {
         let mut file = File::open(rom_path)?;
         file.seek(SeekFrom::Start(HEADER_START as u64))?;
-
         let mut header_bytes = vec![0; HEADER_SIZE];
         file.read_exact(&mut header_bytes)?;
 
-        let nintendo_logo = header_bytes[0x04..=0x33]
-            .try_into()
-            .unwrap();
-        
-        let title_bytes = header_bytes[0x34..=0x43].to_vec();
+        let nintendo_logo = header_bytes[0x04..=0x33].try_into().unwrap();
+
+        let cgb_flag = header_bytes[0x43];
+        let mut title_end = 0x43;
+        if cgb_flag == CGB_ENHANCED || cgb_flag == CGB_ONLY {
+            // byte at 0x143 is used for CGB flag instead of title in this case
+            title_end -= 1; 
+        }
+        let title_bytes = header_bytes[0x34..=title_end].to_vec();
         let title = match String::from_utf8(title_bytes) {
             Ok(s) => s.replace("\0", ""),
-            Err(_) => String::from(""),
+            Err(e) => panic!("Unable to parse header title: {}", e),
         };
 
         let manufacturer_code = match String::from_utf8(header_bytes[0x3F..=0x42].to_vec()) {
             Ok(s) => s.replace("\0", ""),
             Err(_) => String::from(""),
         };
-
-
-        let cgb_flag = header_bytes[0x43];
 
         let old_licensee_code = header_bytes[0x4B];
         let licensee_code = if old_licensee_code != 0x33 {
@@ -65,6 +69,8 @@ impl Header {
 
         let ram_size = header_bytes[0x49];
 
+        let destination_code = header_bytes[0x4A];
+
         let version_number = header_bytes[0x4C];
 
         let header_checksum = header_bytes[0x4D];
@@ -72,14 +78,11 @@ impl Header {
         // unused for most games
         let global_checksum = ((header_bytes[0x4E] as u16) << 8) | header_bytes[0x4F] as u16;
 
-        let destination_code = header_bytes[0x4A];
-
         let mut checksum: u8 = 0;
         for i in 0x34..=0x4C {
             checksum = checksum.wrapping_sub(header_bytes[i]).wrapping_sub(1);
         }
-
-        assert!(checksum == header_checksum, "Invalid Header Checksum");
+        assert!(checksum == header_checksum, "Header bytes do not match header checksum.");
 
         Ok(Header {
             nintendo_logo,

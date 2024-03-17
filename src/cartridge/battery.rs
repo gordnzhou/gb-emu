@@ -4,15 +4,15 @@ use super::{mbc::RAM_BANK_SIZE, rtc::{Rtc, RTC_REGISTERS_SIZE}};
 
 pub const SAVE_PATH: &str = "saves";
 
-/// Saves and loads RAM and/or RTC state to file identified by game title
+/// Saves and loads RAM and/or RTC state to file identified by header hash
 pub struct Battery {
     rom_file_location: String,
     rtc_file_location: String,
 }
 
 impl Battery {
-    pub fn new(title: String) -> Self {
-        let save_folder = format!("{}/{}", SAVE_PATH, title);
+    pub fn new(header_hash: String) -> Self {
+        let save_folder: String = format!("{}/{}", SAVE_PATH, header_hash);
         let rom_file_location = format!("{}/ram", save_folder);
         let rtc_file_location = format!("{}/rtc", save_folder);
 

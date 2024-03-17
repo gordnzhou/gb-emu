@@ -10,7 +10,6 @@ use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::{AudioSubsystem, Sdl};
 
 use crate::emulator::CYCLE_HZ;
-use crate::timer::Stepper;
 use self::channels::*;
 use envelope::Envelope;
 use length_counter::LengthCounter;
@@ -20,6 +19,8 @@ const MAX_PERIOD: u32 = 2048;
 
 const SAMPLING_RATE_HZ: u32 = 48000;
 const AUDIO_SAMPLES: usize = 2048;
+
+const MASTER_VOLUME: f32 = 0.2;
 
 struct Callback {
     audio_rx: Receiver<[[f32; 2]; AUDIO_SAMPLES]>,
@@ -46,6 +47,10 @@ impl AudioCallback for Callback {
                 }
             }
         }
+
+        for i in 0..stream.len() {
+            stream[i] *= MASTER_VOLUME
+        }
     }
 }
 
@@ -66,9 +71,6 @@ pub struct Apu {
     noise: Noise,
 
     apu_on: bool,
-    length_stepper: Stepper,
-    envelope_stepper: Stepper,
-    sweep_stepper: Stepper,
 }
 
 impl Apu {
@@ -117,9 +119,6 @@ impl Apu {
             noise: Noise::new(),
 
             apu_on: true,
-            length_stepper: Stepper::new(1, 2),
-            envelope_stepper: Stepper::new(0, 8),
-            sweep_stepper: Stepper::new(1, 4),
         }
     }
 
@@ -128,14 +127,10 @@ impl Apu {
             return;
         }
 
-        let length_step = self.length_stepper.step(div_apu_tick as u32) > 0;
-        let envelope_step = self.envelope_stepper.step(div_apu_tick as u32) > 0;
-        let sweep_step = self.sweep_stepper.step(div_apu_tick as u32) > 0;
-
-        self.pulse1.step(length_step, envelope_step, sweep_step);
-        self.pulse2.step(length_step, envelope_step);
-        self.wave  .step(length_step);
-        self.noise .step(length_step, envelope_step);
+        self.pulse1.step(div_apu_tick);
+        self.pulse2.step(div_apu_tick);
+        self.wave  .step(div_apu_tick);
+        self.noise .step(div_apu_tick);
         
         for _ in 0..cycles {
             let pulse1_sample = self.pulse1.make_sample();
@@ -213,7 +208,7 @@ impl Apu {
     }
 
     pub fn write_io(&mut self, addr: usize, byte: u8) {
-        if !self.apu_on {
+        if !self.apu_on && addr != 0xFF26 {
             return;
         }
 
@@ -247,8 +242,7 @@ impl Apu {
                 self.turn_on_apu();
             }
         }
-
-        self.nr52 = (byte & 0x80) | (self.nr52 & 0x7F);
+        self.nr52 = byte & 0x80;
     }
 
     fn turn_on_apu(&mut self) {
@@ -257,9 +251,11 @@ impl Apu {
 
     fn turn_off_apu(&mut self) {
         self.apu_on = false;
+        self.nr51 = 0;
+        self.nr50 = 0;
         self.pulse1 = Pulse1::new();
         self.pulse2 = Pulse2::new();
-        self.wave = Wave::new();
+        self.wave = self.wave.reset();
         self.noise = Noise::new();
     }
 

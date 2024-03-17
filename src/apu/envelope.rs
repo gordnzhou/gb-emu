@@ -1,4 +1,5 @@
 pub struct Envelope {
+    fs_ticks: u8,
     pub cur_volume: u8,
     pub sweep_pace: u8, 
     pub initial_volume: u8,
@@ -9,6 +10,7 @@ pub struct Envelope {
 impl Envelope {
     pub fn new() -> Self {
         Envelope {
+            fs_ticks: 0,
             cur_volume: 0,
             sweep_ticks: 0,
             sweep_pace: 0,
@@ -17,7 +19,11 @@ impl Envelope {
         }
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, div_apu_tick: u8) {
+        self.fs_ticks += div_apu_tick;
+        if self.fs_ticks < 8 { return; }
+        self.fs_ticks = 0;
+
         if self.sweep_pace == 0 {
             return;
         }
