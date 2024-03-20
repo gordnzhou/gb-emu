@@ -1,10 +1,10 @@
 pub struct Sweep {
     fs_ticks: u8,
-    pub cur_freq_period: u32,
+    cur_freq_period: u32,
     shadow_freq_period: u32,
-    pub sweep_period: u32,
-    pub sweep_up: bool,
-    pub shift: u32,
+    sweep_period: u32,
+    sweep_up: bool,
+    shift: u32,
     enabled: bool,
     sweep_timer: u32,
 }
@@ -83,5 +83,16 @@ impl Sweep {
         if self.shift > 0 {
             return self.next_freq_period().is_some();
         } else { true }
+    }
+
+    pub fn set(&mut self, byte: u8) {
+        self.shift = byte as u32 & 0x07;
+        self.sweep_up = byte & 0x08 == 0;
+        self.sweep_period = (byte as u32 & 0x70) >> 4;
+    }
+
+    /// Set this everytime NR13 or NR14 get updated
+    pub fn set_period(&mut self, period: u32) {
+        self.cur_freq_period = period
     }
 }

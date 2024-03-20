@@ -27,7 +27,9 @@ pub const LCD_HEIGHT: usize = 144;
 pub const BYTES_PER_PIXEL: usize = 4;
 pub const LCD_BYTE_WIDTH: usize = BYTES_PER_PIXEL * LCD_WIDTH;
 
+// DETERMINES GAME SPEED
 pub const DOT_HZ: u32 = 1 << 22;
+
 pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
 
 // 1 dot = 2^22 Hz = 1/4 M-cycle = 238.4... ns
@@ -43,7 +45,8 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new(screen_scale: i32, cartrige: Cartridge) -> Result<Self, String> {
+    /// Loads in given cartridge and initializes Gameboy emulator.
+    pub fn load_cartridge(screen_scale: i32, cartrige: Cartridge) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
 
         let video_subsystem = sdl_context.video()?;
@@ -83,7 +86,7 @@ impl Emulator {
     }
 
     /// Runs the emulator for the specified number of nanoseconds.
-    pub fn debug_run(&mut self, total_dur_ns: u64) {
+    pub fn run_for_duration(&mut self, total_dur_ns: u64) {
         let mut dur_ns = 0;
 
         let creator = self.canvas.texture_creator();
@@ -96,7 +99,7 @@ impl Emulator {
         let screen_height = LCD_HEIGHT as u32 * self.screen_scale as u32;
         let rect = Rect::new(0, 0, screen_width, screen_height);
 
-        // NOTE: cycle timings is seem to be controlled by APU audio callback 
+        // NOTE: cycle timings seem to be controlled by APU audio callback 
         while dur_ns < total_dur_ns {
             self.cpu.bus.joypad.step(self.key_status);
             let cycles = self.cpu.step();
@@ -105,6 +108,26 @@ impl Emulator {
             let cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
             dur_ns += cpu_duration_ns;
         } 
+    }
+
+    /// Gets user input and updates screen, once every frame.
+    fn next_frame(&mut self, texture: &mut Texture, rect: Rect) {
+        if !self.cpu.bus.ppu.entered_vblank {
+            return;
+        }
+        self.cpu.bus.ppu.entered_vblank = false;
+
+        match self.get_events() {
+            Ok(_) => self.cpu.bus.joypad.step(self.key_status),
+            Err(e) => panic!("{}", e)
+        }
+
+        texture
+            .update(None, &self.cpu.bus.ppu.frame_buffer, LCD_BYTE_WIDTH)
+            .expect("texture update failed");
+
+        self.canvas.copy(&texture, None, rect).unwrap();
+        self.canvas.present();
     }
 
     fn get_events(&mut self) -> Result<(), &str> { 
@@ -134,24 +157,5 @@ impl Emulator {
         }
 
         Ok(())
-    }
-
-    /// Renders frame buffer to SDL2 canvas (60 times per second).
-    fn next_frame(&mut self, texture: &mut Texture, rect: Rect) {
-        if !self.cpu.bus.ppu.entered_vblank {
-            return;
-        }
-
-        match self.get_events() {
-            Ok(_) => self.cpu.bus.joypad.step(self.key_status),
-            Err(e) => panic!("{}", e)
-        }
-
-        texture
-            .update(None, &self.cpu.bus.ppu.frame_buffer, LCD_BYTE_WIDTH)
-            .expect("texture update failed");
-
-        self.canvas.copy(&texture, None, rect).unwrap();
-        self.canvas.present();
     }
 }

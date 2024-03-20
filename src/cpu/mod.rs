@@ -17,6 +17,7 @@ pub struct Cpu {
     pub(self) halted: bool,
     pub(self) halt_bug: bool,
     pub(self) halt_triggered: bool,
+    pub(self) cycles_so_far: u8,
 
     pub(self) af: Register,
     pub(self) bc: Register,
@@ -44,6 +45,7 @@ impl Cpu {
                 halted: false,
                 halt_bug: false,
                 halt_triggered: false,
+                cycles_so_far: 0,
                 af: Register(0),
                 bc: Register(0),
                 de: Register(0),
@@ -63,6 +65,7 @@ impl Cpu {
                 halted: false,
                 halt_bug: false,
                 halt_triggered: false,
+                cycles_so_far: 0,
                 af: Register(0x01B0),
                 bc: Register(0x0013),
                 de: Register(0x00D8),
@@ -83,8 +86,11 @@ impl Cpu {
     pub fn step(&mut self) -> u8 {
         let cycles = self.cycle();
 
-        self.bus.step(cycles);
-        
+        if cycles > 0 {
+            self.bus.step(cycles, cycles - self.cycles_so_far);
+        }
+        self.cycles_so_far = 0;
+       
         cycles
     }
 
@@ -146,26 +152,24 @@ impl Cpu {
 
 #[cfg(test)]
 mod tests {
-    use core::panic;
-    use crate::{cartridge::Cartridge, cpu::Cpu};
+    use crate::test_blargg_rom;
 
-    const TIMEOUT: u64 = 1 << 32;
-    const CPU_INSTR: &str = "roms/cpu_instrs.gb";
+    const CPU_INSTR: &str = "roms/tests/cpu_instrs.gb";
+    const MEM_TIMING: &str = "roms/tests/mem_timing.gb";
+    const INSTR_TIMING: &str = "roms/tests/instr_timing.gb";
 
     #[test]
     fn cpu_instr_test() {
-        let cartridge = Cartridge::from_file(CPU_INSTR, false);
-        let mut cpu = Cpu::new(cartridge);
+        test_blargg_rom(CPU_INSTR)
+    }
 
-        let mut cycles: u64 = 0;
-        while cycles < TIMEOUT {
-            cycles += cpu.step() as u64;
+    #[test]
+    fn cpu_mem_timing_test() {
+        test_blargg_rom(MEM_TIMING);
+    }
 
-            if cpu.bus.serial_output.contains("Passed") {
-                break;
-            } else if cpu.bus.serial_output.contains("Failed") {
-                panic!("cpu_instr test ROM failed");
-            }
-        } 
+    #[test]
+    fn cpu_instr_timing_test() {
+        test_blargg_rom(INSTR_TIMING);
     }
 }

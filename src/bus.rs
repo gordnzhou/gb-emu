@@ -27,6 +27,8 @@ const EMPTY_END: usize = 0xFEFF;
 const HRAM_START: usize = 0xFF80;
 const HRAM_END: usize = 0xFFFE;
 
+const DMA_CYCLES: u16 = 160;
+
 pub struct Bus {
     pub cartridge: Cartridge,
     pub joypad: Joypad,
@@ -39,6 +41,9 @@ pub struct Bus {
     interrupt_flag: u8,
 
     pub serial_output: String,
+    div_apu_tick: bool,
+    dma_start: u16,
+    dma_ticks: u16,
 }
 
 impl Bus {
@@ -55,6 +60,9 @@ impl Bus {
             interrupt_flag: 0xE0,
 
             serial_output: String::new(),
+            div_apu_tick: false,
+            dma_start: 0,
+            dma_ticks: DMA_CYCLES,
         }
     }
 
@@ -63,15 +71,15 @@ impl Bus {
         self
     }
 
-    /// Steps through APU, PPU and Timer, and updates interrupt flag(s).
-    pub fn step(&mut self, cycles: u8) {
-        let old_div = self.timer.div;
-        if self.timer.step(cycles) {
-            self.request_interrupt(Interrupt::Timer)
-        }
+    /// Steps through other components to be done at the END OF EACH INTSTRUCTION.
+    /// Updates interrupt flags accordingly.
+    pub fn step(&mut self, cycles: u8, remaining_cycles: u8) {
 
-        self.apu.step(cycles as u32, old_div & 0x10 != 0 && self.timer.div & 0x10 == 0);
+        self.partial_step(remaining_cycles);
 
+        self.apu.step(cycles as u32, self.div_apu_tick);
+        self.div_apu_tick = false;
+        
         self.ppu.step(cycles);
 
         if self.ppu.entered_vblank {
@@ -83,6 +91,21 @@ impl Bus {
         if self.joypad.interrupt {
             self.request_interrupt(Interrupt::Joypad)
         }
+    }
+
+    /// Steps through components; to be MID INSTRUCTION for every bus read/write, 
+    /// along with during the end of each instruction.
+    /// This is because some components (like the Timer), need to be updated mid-instruction wise,
+    /// While others (like the APU) should wait until each instruction ends before updating.
+    pub fn partial_step(&mut self, cycles: u8) {
+
+        self.step_oam_dma(cycles);
+
+        let old_div = self.timer.div;
+        if self.timer.step(cycles) {
+            self.request_interrupt(Interrupt::Timer)
+        }
+        self.div_apu_tick |= old_div & 0x10 != 0 && self.timer.div & 0x10 == 0;
     }
 
     /// Returns byte from specified address; returns 0xFF for unused addresses.
@@ -133,7 +156,7 @@ impl Bus {
             0xFF0F          => self.interrupt_flag = 0xE0 | byte,
             0xFF10..=0xFF26 => self.apu.write_io(addr, byte),
             0xFF30..=0xFF3F => self.apu.write_io(addr, byte),
-            0xFF40..=0xFF4B => self.ppu_write(addr, byte),
+            0xFF40..=0xFF4B => self.ppu_write_io(addr, byte),
             0xFF50          => self.cartridge.write_bank(byte),
 
             HRAM_START..=HRAM_END => self.hram[addr - HRAM_START] = byte,
@@ -142,32 +165,29 @@ impl Bus {
         }
     }
 
-    /// Returns big-endian word at \[addr\], \[addr + 1\].
-    pub fn read_word(&self, addr: u16) -> u16 {
-        let lo = self.read_byte(addr) as u16;
-        let hi = self.read_byte(addr.wrapping_add(1)) as u16;
-        (hi << 8) | lo
-    }
-
-    /// Writes word little-endian to \[addr\], \[addr + 1\].
-    pub fn write_word(&mut self, addr: u16, word: u16) {
-        self.write_byte(addr, word as u8);
-        self.write_byte(addr.wrapping_add(1), (word >> 8) as u8);
-    }
-
-    fn ppu_write(&mut self, addr: usize, byte: u8) {
+    /// Writes to a PPU io register; if addr == 0xFF46, initialize a DMA transfer.
+    fn ppu_write_io(&mut self, addr: usize, byte: u8) {
         let dma_write = self.ppu.write_io(addr, byte);
         if dma_write {
-            self.transfer_to_oam((byte as u16) << 8);
+            self.dma_start = (byte as u16) << 8;
+            self.dma_ticks = 0;
+            self.step_oam_dma(1);
         }
     }
 
-    /// Starts a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
-    /// for 160 M-cycles (640 dots).
-    fn transfer_to_oam(&mut self, start: u16) {
-        for i in 0x00..=0x9F {
-            let byte = self.read_byte(start | i);
-            self.ppu.write_oam(0xFE00 | i as usize, byte);
+    /// Steps through a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
+    /// which runs for 160 M-cycles in total.
+    fn step_oam_dma(&mut self, cycles: u8) {
+        let mut cycles = cycles;
+        while cycles > 0 && self.dma_ticks < DMA_CYCLES {
+
+            // One byte transferred per M cycle during OAM DMA.\
+            let dma_index = self.dma_ticks;
+            let byte = self.read_byte(self.dma_start | dma_index);
+            self.ppu.write_oam(0xFE00 | dma_index as usize, byte);
+
+            cycles -=1;
+            self.dma_ticks += 1;
         }
     }
 

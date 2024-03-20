@@ -3,8 +3,7 @@ mod pulse;
 mod wave;
 
 pub use noise::Noise;
-pub use pulse::Pulse1;
-pub use pulse::Pulse2;
+pub use pulse::Pulse;
 pub use wave::Wave;
 
 use super::LengthCounter;

@@ -1,25 +1,16 @@
 #![allow(non_snake_case)]
 use super::{Cpu, Interrupt::*, Interrupt};
 
-use std::fs::OpenOptions;
-use std::io::prelude::*;
-
 impl Cpu {
-    /// Execute the next instruction, returning number of clock M-cycles taken.
+    /// Execute the next instruction, returning TOTAL number of M-cycles taken.
     pub(super) fn execute_next_instruction(&mut self) -> u8 {
-        let opcode = self.bus.read_byte(self.PC());
+        let opcode = self.bus_read_byte(self.PC());
 
         if self.halt_bug {
             self.halt_bug = false;
         } else {
             self.inc_PC(1);
         }
-
-        // FOR TESTING
-        // let log_message = format!("A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}", 
-        //     self.A(), self.AF() as u8, self.B(), self.C(), self.D(), self.E(), self.H(), self.L(),
-        //     self.SP(), self.PC(), opcode, self.memory.read_byte(self.PC() + 1), self.memory.read_byte(self.PC() + 2), self.memory.read_byte(self.PC() + 3));  
-        // log_to_file(&log_message).unwrap();
 
         let cycles = match opcode {
             0x00 => self.nop(),
@@ -492,17 +483,18 @@ impl Cpu {
 
     fn pop_stack(&mut self) -> u16 {
         let sp = self.SP();
-        let res = self.bus.read_word(sp);
+        let lo = self.bus_read_byte(sp) as u16;
+        let hi = self.bus_read_byte(sp.wrapping_add(1)) as u16;
         self.set_SP(sp.wrapping_add(2));
-        res as u16
+        (hi << 8) | lo as u16
     }
 
     fn push_stack(&mut self, val16: u16) {
         let hi = ((val16 & 0xFF00) >> 8) as u8;
         let lo = val16 as u8;
         let sp = self.SP();
-        self.bus.write_byte(sp.wrapping_sub(1), hi);
-        self.bus.write_byte(sp.wrapping_sub(2), lo);
+        self.bus_write_byte(sp.wrapping_sub(1), hi);
+        self.bus_write_byte(sp.wrapping_sub(2), lo);
         self.set_SP(sp.wrapping_sub(2));
     }
 
@@ -525,69 +517,71 @@ impl Cpu {
 
     fn ld_hl_n8(&mut self) -> u8{
         let n8 = self.n8();
-        self.bus.write_byte(self.HL(), n8);
+        self.bus_write_byte(self.HL(), n8);
         3
     }
 
     fn ld_hl_r8(&mut self, r8_name: &str) -> u8{
-        self.bus.write_byte(self.HL(), self.r8(r8_name));
+        self.bus_write_byte(self.HL(), self.r8(r8_name));
         2
     }
 
     fn ld_r8_hl(&mut self, r8_name: &str) -> u8 {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         self.set_r8(r8_name, hl);
         2
     }
 
     fn ld_r16_a(&mut self, r16_name: &str) -> u8 {
-        self.bus.write_byte(self.r16(r16_name), self.A());
+        self.bus_write_byte(self.r16(r16_name), self.A());
         2
     }
 
     fn ld_a_r16(&mut self, r16_name: &str) -> u8 {
-        let r16 = self.bus.read_byte(self.r16(r16_name));
+        let r16 = self.bus_read_byte(self.r16(r16_name));
         self.set_A(r16);
         2
     }
 
     fn ld_n16_a(&mut self) -> u8 {
         let n16 = self.n16();
-        self.bus.write_byte(n16, self.A());
+        self.bus_write_byte(n16, self.A());
         4
     }
 
     fn ld_a_n16(&mut self) -> u8 {
         let n16 = self.n16();
-        let n16 = self.bus.read_byte(n16);
+        let n16 = self.bus_read_byte(n16);
         self.set_A(n16);
         4
     }
 
     fn ld_hli_a(&mut self) -> u8 {
         let hl = self.HL();
-        self.bus.write_byte(hl, self.A());
+        self.bus_write_byte(hl, self.A());
         self.set_HL(hl.wrapping_add(1));
         2
     }
 
     fn ld_hld_a(&mut self) -> u8 {
         let hl = self.HL();
-        self.bus.write_byte(hl, self.A());
+        self.bus_write_byte(hl, self.A());
         self.set_HL(hl.wrapping_sub(1));
         2
     }
 
     fn ld_a_hli(&mut self) -> u8 {
         let hl = self.HL();
-        self.set_A(self.bus.read_byte(hl));
+        let byte = self.bus_read_byte(hl);
+        self.set_A(byte);
         self.set_HL(hl.wrapping_add(1));
         2
     }
 
     fn ld_a_hld(&mut self) -> u8 {
         let hl = self.HL();
-        self.set_A(self.bus.read_byte(hl));
+        let byte = self.bus_read_byte(hl);
+        self.set_A(byte);
         self.set_HL(hl.wrapping_sub(1));
         2
     }
@@ -595,7 +589,8 @@ impl Cpu {
     fn ld_n16_sp(&mut self) -> u8 {
         let n16 = self.n16();
         let sp = self.SP();
-        self.bus.write_word(n16, sp as u16);
+        self.bus_write_byte(n16, sp as u8);
+        self.bus_write_byte(n16.wrapping_add(1), (sp >> 8) as u8);
         5
     }
 
@@ -612,25 +607,27 @@ impl Cpu {
 
     fn ldh_n16_a(&mut self) -> u8 {
         let n16 = 0xFF00 | (self.n8() as u16);
-        self.bus.write_byte(n16, self.A());
+        self.bus_write_byte(n16, self.A());
         3
     }
 
     fn ldh_a_n16(&mut self) -> u8 {
         let n16 = 0xFF00 | (self.n8() as u16);
-        self.set_A(self.bus.read_byte(n16));
+        let byte = self.bus_read_byte(n16);
+        self.set_A(byte);
         3
     }
 
     fn ldh_c_a(&mut self) -> u8 {
         let c = 0xFF00 | self.C() as u16;
-        self.bus.write_byte(c, self.A());
+        self.bus_write_byte(c, self.A());
         2
     }
 
     fn ldh_a_c(&mut self) -> u8 {
         let c = 0xFF00 | self.C() as u16;
-        self.set_A(self.bus.read_byte(c));
+        let byte = self.bus_read_byte(c);
+        self.set_A(byte);
         2
     }
 
@@ -679,10 +676,10 @@ impl Cpu {
     }
 
     fn dec_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = hl.wrapping_sub(1);
         self.set_all_flags(res == 0, true, hl & 0xf == 0, self.cflag());
-        self.bus.write_byte(self.HL(), res);
+        self.bus_write_byte(self.HL(), res);
         3
     }
 
@@ -701,10 +698,10 @@ impl Cpu {
     }
 
     fn inc_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = hl.wrapping_add(1);
         self.set_all_flags(res == 0, false, hl & 0xf == 0xf, self.cflag());
-        self.bus.write_byte(self.HL(), res);
+        self.bus_write_byte(self.HL(), res);
         3
     }
 
@@ -722,7 +719,7 @@ impl Cpu {
     }
 
     fn xor_a_hl(&mut self) -> u8 {
-        let res = self.A() ^ self.bus.read_byte(self.HL());
+        let res = self.A() ^ self.bus_read_byte(self.HL());
         self.set_A(res);
         self.set_all_flags(res == 0, false, false, false);
         2
@@ -743,7 +740,7 @@ impl Cpu {
     }
 
     fn or_a_hl(&mut self) -> u8 {
-        let res = self.A() | self.bus.read_byte(self.HL());
+        let res = self.A() | self.bus_read_byte(self.HL());
         self.set_A(res);
         self.set_all_flags(res == 0, false, false, false);
         2
@@ -764,7 +761,7 @@ impl Cpu {
     }
 
     fn and_a_hl(&mut self) -> u8 {
-        let res = self.A() & self.bus.read_byte(self.HL());
+        let res = self.A() & self.bus_read_byte(self.HL());
         self.set_A(res);
         self.set_all_flags(res == 0, false, true, false);
         2
@@ -785,7 +782,7 @@ impl Cpu {
     }
 
     fn sbc_a_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL()) as u32;
+        let hl = self.bus_read_byte(self.HL()) as u32;
         let res = self.sub_and_set_flags(self.A() as u32, hl, true);
         self.set_A(res);
         2
@@ -806,7 +803,7 @@ impl Cpu {
     }
 
     fn sub_a_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL()) as u32;
+        let hl = self.bus_read_byte(self.HL()) as u32;
         let res = self.sub_and_set_flags(self.A() as u32, hl, false);
         self.set_A(res);
         2
@@ -826,7 +823,7 @@ impl Cpu {
     }
 
     fn cp_a_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL()) as u32;
+        let hl = self.bus_read_byte(self.HL()) as u32;
         self.sub_and_set_flags(self.A() as u32, hl, false);
         2
     }
@@ -845,7 +842,7 @@ impl Cpu {
     }
 
     fn add_a_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL()) as u32;
+        let hl = self.bus_read_byte(self.HL()) as u32;
         let res = self.add_and_set_flags(self.A() as u32, hl, false);
         self.set_A(res);
         2
@@ -887,7 +884,7 @@ impl Cpu {
     }
 
     fn adc_a_hl(&mut self) -> u8 {
-        let hl = self.bus.read_byte(self.HL()) as u32;
+        let hl = self.bus_read_byte(self.HL()) as u32;
         let res = self.add_and_set_flags(self.A() as u32, hl, true);
         self.set_A(res);
         2
@@ -921,7 +918,7 @@ impl Cpu {
     }
 
     fn cb_execute(&mut self, ) -> u8 {
-        let opcode = self.bus.read_byte(self.PC());
+        let opcode = self.bus_read_byte(self.PC());
         self.inc_PC(1);
 
         match opcode {
@@ -1212,8 +1209,8 @@ impl Cpu {
     }
 
     fn set_u3_hl(&mut self, u3: u8) {
-        let hl = self.bus.read_byte(self.HL());
-        self.bus.write_byte(self.HL(), hl | (1 << u3));
+        let hl = self.bus_read_byte(self.HL());
+        self.bus_write_byte(self.HL(), hl | (1 << u3));
     }
 
     fn res_u3_r8(&mut self, u3: u8, r8_name: &str) {
@@ -1222,8 +1219,8 @@ impl Cpu {
     }
 
     fn res_u3_hl(&mut self, u3: u8) {
-        let hl = self.bus.read_byte(self.HL());
-        self.bus.write_byte(self.HL(), hl & !(1 << u3));
+        let hl = self.bus_read_byte(self.HL());
+        self.bus_write_byte(self.HL(), hl & !(1 << u3));
     }
 
     fn bit_u3_r8(&mut self, u3: u8, r8_name: &str) {
@@ -1232,7 +1229,7 @@ impl Cpu {
     }
 
     fn bit_u3_hl(&mut self, u3: u8) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         self.set_all_flags(hl & (1 << u3) == 0, false, true, self.cflag());
     }
 
@@ -1242,9 +1239,9 @@ impl Cpu {
     }
 
     fn swap_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.swap_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res);
+        self.bus_write_byte(self.HL(), res);
     }
 
     fn swap_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1260,9 +1257,9 @@ impl Cpu {
     }
 
     fn sla_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.sla_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res);
+        self.bus_write_byte(self.HL(), res);
     }
     
     fn sla_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1278,9 +1275,9 @@ impl Cpu {
     }
 
     fn sra_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.sra_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res);
+        self.bus_write_byte(self.HL(), res);
     }
 
     fn sra_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1296,9 +1293,9 @@ impl Cpu {
     }
 
     fn srl_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.srl_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res);
+        self.bus_write_byte(self.HL(), res);
     }
 
     fn srl_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1314,9 +1311,9 @@ impl Cpu {
     }
 
     fn rlc_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.rlc_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res)
+        self.bus_write_byte(self.HL(), res)
     }
 
     fn rlc_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1332,9 +1329,9 @@ impl Cpu {
     }
 
     fn rl_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.rl_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res)
+        self.bus_write_byte(self.HL(), res)
     }
 
     fn rl_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1350,9 +1347,9 @@ impl Cpu {
     }
 
     fn rrc_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.rrc_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res)
+        self.bus_write_byte(self.HL(), res)
     }
 
     fn rrc_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1368,9 +1365,9 @@ impl Cpu {
     }
 
     fn rr_hl(&mut self) {
-        let hl = self.bus.read_byte(self.HL());
+        let hl = self.bus_read_byte(self.HL());
         let res = self.rr_and_set_flags(hl);
-        self.bus.write_byte(self.HL(), res)
+        self.bus_write_byte(self.HL(), res)
     }
 
     fn rr_and_set_flags(&mut self, val: u8) -> u8 {
@@ -1378,6 +1375,19 @@ impl Cpu {
         let res = (val >> 1) | if self.cflag() { 0x80 } else { 0 }; 
         self.set_all_flags(res == 0, false, false, c);
         res
+    }
+
+    fn bus_read_byte(&mut self, addr: u16) -> u8 {
+        let byte = self.bus.read_byte(addr);
+        self.bus.partial_step(1);
+        self.cycles_so_far += 1;
+        byte
+    }
+
+    fn bus_write_byte(&mut self, addr: u16, byte: u8) {
+        self.bus.write_byte(addr, byte);
+        self.bus.partial_step(1);
+        self.cycles_so_far += 1;
     }
 
     fn n16(&mut self) -> u16 {
@@ -1391,7 +1401,7 @@ impl Cpu {
     }
 
     fn n8(&mut self) -> u8 {
-        let res = self.bus.read_byte(self.PC());
+        let res = self.bus_read_byte(self.PC());
         self.inc_PC(1);
         res
     }
@@ -1494,15 +1504,4 @@ impl Cpu {
     fn set_hflag(&mut self, val: bool)  { self.af.set_bit(5, val); }
     fn set_nflag(&mut self, val: bool) { self.af.set_bit(6, val); }
     fn set_zflag(&mut self, val: bool) { self.af.set_bit(7, val); }
-}
-
-// FOR TESTING
-#[allow(dead_code)]
-fn log_to_file(message: &str) -> std::io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("logs/log.txt")?;
-
-    writeln!(file, "{}", message)
 }

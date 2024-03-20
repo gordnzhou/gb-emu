@@ -117,9 +117,8 @@ impl Ppu {
 
     /// Steps through the PPU over the given period (in cycles).
     pub fn step(&mut self, cycles: u8) {
-        self.entered_vblank = false;
-        self.stat_triggered = false;
         if self.lcd_ppu_disabled() { return; }
+        self.stat_triggered = false;
 
         let dots = cycles as u32 * 4;
         let next_dots = self.mode_elapsed_dots + dots;
@@ -209,16 +208,15 @@ impl Ppu {
             }
             Mode::Drawing3 => {
                 let mut pixels_left = dots;
-
                 while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
                     self.wy_cond |= self.wy == self.ly;
-                    self.wx_cond |= if self.wx < 7 {
+                    self.wx_cond = if self.wx < 7 {
                         self.wx as usize <= self.cur_pixel_x + 7
                     } else {
-                        self.wx as usize - 7 == self.cur_pixel_x
+                        self.wx as usize <= self.cur_pixel_x + 7
                     };
 
-                    // future TODO: implement BG and OAM FIFO 
+                    // future TODO (maybe): implement BG and OAM FIFO 
                     let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize; 
                     for i in 0..=3 {
                         self.frame_buffer[usize::from(self.ly as usize) * LCD_BYTE_WIDTH
@@ -249,6 +247,7 @@ impl Ppu {
 
         let tile_data =  if self.win_enabled() && self.wx_cond && self.wy_cond {
             self.line_has_window = true;
+            // assert!(lcd_x + 7 >= self.wx as usize, "{} {}", lcd_x, self.wx);
             let x = lcd_x + 7 - self.wx as usize;
             let y = self.win_counter;
             self.fetch_bgwin_tile(x, y, false)
@@ -525,7 +524,7 @@ mod tests {
 
     use super::{LCD_HEIGHT, LCD_WIDTH};
 
-    const TEST_FILE: &str = "roms/dmg-acid2.gb";
+    const TEST_FILE: &str = "roms/tests/dmg-acid2.gb";
     const CHECKSUM: u32 = 3249083280;
 
     #[test]

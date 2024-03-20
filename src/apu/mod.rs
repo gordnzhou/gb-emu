@@ -33,7 +33,6 @@ impl AudioCallback for Callback {
     fn callback(&mut self, stream: &mut [f32]) {
         match self.audio_rx.recv_timeout(Duration::from_millis(30)) {
             Ok(buffer) => {
-                // TODO: update audio such that no buffer underruns occur
                 for i in 0..buffer.len() {
                     stream[i * 2] = buffer[i][0];
                     stream[i * 2 + 1] = buffer[i][1];
@@ -65,8 +64,8 @@ pub struct Apu {
     nr51: u8,
     nr50: u8,
 
-    pulse1: Pulse1,
-    pulse2: Pulse2,
+    pulse1: Pulse,
+    pulse2: Pulse,
     wave: Wave,
     noise: Noise,
 
@@ -113,8 +112,8 @@ impl Apu {
             nr51: 0,
             nr50: 0,
 
-            pulse1: Pulse1::new(),
-            pulse2: Pulse2::new(),
+            pulse1: Pulse::new(true),
+            pulse2: Pulse::new(false),
             wave: Wave::new(),
             noise: Noise::new(),
 
@@ -143,7 +142,6 @@ impl Apu {
             // let wave_sample = 0.0;
             // let noise_sample = 0.0;
             
-            // TODO: TEMPORARY FIX FOR BUFFER UNDERRUNS
             if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
                 self.sample_gather = 0;
 
@@ -227,10 +225,10 @@ impl Apu {
 
     fn read_nr52(&self) -> u8 {
         let mut res = self.nr52 & 0x80;
-        res |= (self.pulse1.channel_on() as u8) << 0;
-        res |= (self.pulse2.channel_on() as u8) << 1;
-        res |= (self.wave  .channel_on() as u8) << 2;
-        res |= (self.noise .channel_on() as u8) << 3;
+        res |= ((self.pulse1.channel_on() && self.pulse1.dac_on()) as u8) << 0;
+        res |= ((self.pulse2.channel_on() && self.pulse2.dac_on())as u8) << 1;
+        res |= ((self.wave  .channel_on() && self.wave  .dac_on()) as u8) << 2;
+        res |= ((self.noise .channel_on() && self.noise .dac_on()) as u8) << 3;
         res | 0x70
     }
 
@@ -253,8 +251,8 @@ impl Apu {
         self.apu_on = false;
         self.nr51 = 0;
         self.nr50 = 0;
-        self.pulse1 = Pulse1::new();
-        self.pulse2 = Pulse2::new();
+        self.pulse1 = Pulse::new(true);
+        self.pulse2 = Pulse::new(false);
         self.wave = self.wave.reset();
         self.noise = Noise::new();
     }

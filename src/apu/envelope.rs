@@ -1,9 +1,9 @@
 pub struct Envelope {
     fs_ticks: u8,
-    pub cur_volume: u8,
-    pub sweep_pace: u8, 
-    pub initial_volume: u8,
-    pub envelope_up: bool,
+    cur_volume: u8,
+    sweep_pace: u8, 
+    initial_volume: u8,
+    envelope_up: bool,
     sweep_ticks: u8,
 }
 
@@ -48,6 +48,16 @@ impl Envelope {
     pub fn on_trigger(&mut self) {
         self.sweep_ticks = 0;
         self.cur_volume = self.initial_volume;
+    }
+
+    pub fn set(&mut self, byte: u8) {
+        self.initial_volume = (byte & 0xF0) >> 4;
+        self.envelope_up = byte & 8 != 0;
+        self.sweep_pace = byte & 7;
+    }
+
+    pub fn volume(&self) -> u8 {
+        self.cur_volume
     }
 }
 

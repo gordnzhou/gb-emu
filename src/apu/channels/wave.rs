@@ -10,13 +10,10 @@ pub struct Wave {
     nr33: u8,
     nr34: u8,
     wave_ram: [u8 ; WAVE_RAM_SIZE],
-
     dac_on: bool,
-    channel_on: bool,
     length_counter: LengthCounter,
     sample_index: usize,
     freq_counter: u32,
-    freq_period: u32,
 }
 
 impl Wave {
@@ -28,13 +25,10 @@ impl Wave {
             nr33: 0,
             nr34: 0,
             wave_ram: [0; WAVE_RAM_SIZE],
-
             dac_on: false,
-            channel_on: false,
             length_counter: LengthCounter::new(LENGTH_TICKS),
             sample_index: 0,
             freq_counter: 0,
-            freq_period: MAX_PERIOD,
         }
     }
 
@@ -46,11 +40,11 @@ impl Wave {
     }
 
     pub fn make_sample(&mut self) -> f32 {
-        if !self.channel_on || !self.dac_on {
+        if !self.length_counter.channel_on() || !self.dac_on {
             return 0.0;
         }
 
-        if self.freq_counter >= self.freq_period {
+        if self.freq_counter >= (MAX_PERIOD - self.period_value()) / 2 {
             self.freq_counter = 0;
             self.sample_index = (self.sample_index + 1) % WAVE_RAM_SIZE;
         }
@@ -68,10 +62,7 @@ impl Wave {
     }
 
     pub fn step(&mut self, div_apu_tick: bool) {
-        if self.length_counter.tick(div_apu_tick as u8) {
-            self.channel_on = false;
-        }
-        self.freq_period = self.period_value();
+        self.length_counter.tick(div_apu_tick as u8);
     }
 
     pub fn read(&self, addr: usize) -> u8 {
@@ -99,7 +90,11 @@ impl Wave {
     }
 
     pub fn channel_on(&self) -> bool {
-        self.channel_on
+        self.length_counter.channel_on() 
+    }
+
+    pub fn dac_on(&self) -> bool {
+        self.dac_on
     }
 
     fn read_wave_ram(&self, addr: usize) -> u8 {
@@ -114,37 +109,28 @@ impl Wave {
     }
 
     fn write_nr31(&mut self, byte: u8) {
+        self.length_counter.set_ticks(byte);
         self.nr31 = byte;
-        self.length_counter.set_ticks(byte as u32);
     }
 
     fn write_nr30(&mut self, byte: u8) {
-        if byte & 0x80 == 0 {
-            self.dac_on = false;
-            self.channel_on = false;
-        } else {
-            self.dac_on = true;
-        }
-
+        self.dac_on = byte & 0x80 != 0;
         self.nr30 = byte;
     }
 
     fn write_nr34(&mut self, byte: u8) {
-        let new_length_enabled = byte & 0x40 != 0;
         if self.nr34 & 0x80 != 0 {
-            if self.dac_on {
-                self.channel_on = true;
-                self.length_counter.on_trigger();
-            }
+            self.length_counter.on_trigger();
             self.sample_index = 0;
             self.freq_counter = 0;
         }
-        self.channel_on = self.length_counter.extra_clocking(new_length_enabled);
-        self.length_counter.enabled = new_length_enabled;
+        let new_length_enabled = byte & 0x40 != 0;
+        self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.set_tick_enable(new_length_enabled);
         self.nr34 = byte
     }
 
     fn period_value(&self) -> u32 {
-        MAX_PERIOD - ((self.nr34 as u32 & 7) << 8 | self.nr33 as u32)
+       (self.nr34 as u32 & 7) << 8 | self.nr33 as u32
     }
 }

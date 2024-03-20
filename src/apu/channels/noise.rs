@@ -7,12 +7,10 @@ pub struct Noise {
     nr42: u8,
     nr43: u8,
     nr44: u8,
-
     length_counter: LengthCounter,
     lfsr: Lfsr,
     envelope: Envelope,
     dac_on: bool,
-    channel_on: bool,
 }
 
 impl Noise {
@@ -22,34 +20,32 @@ impl Noise {
             nr42: 0,
             nr43: 0, 
             nr44: 0,
-
             length_counter: LengthCounter::new(LENGTH_TICKS),
             lfsr: Lfsr::new(),
             envelope: Envelope::new(),
             dac_on: false,
-            channel_on: false,
         }
     }
 
     pub fn make_sample(&mut self) -> f32 {
-        if !self.channel_on || !self.dac_on {
+        if !self.length_counter.channel_on() || !self.dac_on {
             return 0.0;
         }
-
         let sample = self.lfsr.next_sample();
-
-        Apu::to_analog(sample * self.envelope.cur_volume)
+        Apu::to_analog(sample * self.envelope.volume())
     }
 
     pub fn step(&mut self, div_apu_tick: bool) {
-        if self.length_counter.tick(div_apu_tick as u8) {
-            self.channel_on = false;
-        }
+        self.length_counter.tick(div_apu_tick as u8);
         self.envelope.step(div_apu_tick as u8);
     }
 
     pub fn channel_on(&self) -> bool {
-        self.channel_on
+        self.length_counter.channel_on()
+    }
+
+    pub fn dac_on(&self) -> bool {
+        self.dac_on
     }
 
     pub fn read(&self, addr: usize) -> u8 {
@@ -74,21 +70,12 @@ impl Noise {
 
     fn write_nr41(&mut self, byte: u8) {
         self.nr41 = byte;
-        self.length_counter.ticks = (byte & 0x3F) as u32;
+        self.length_counter.set_ticks(byte)
     }
 
     fn write_nr42(&mut self, byte: u8) {
-        if byte & 0xF8 == 0 {
-            self.dac_on = false;
-            self.channel_on = false;
-        } else {
-            self.dac_on = true;
-        }
-
-        self.envelope.initial_volume = (byte & 0xF0) >> 4;
-        self.envelope.envelope_up = (byte & 8) != 0;
-        self.envelope.sweep_pace = byte & 7;
-
+        self.dac_on = byte & 0xF8 != 0 ;
+        self.envelope.set(byte);
         self.nr42 = byte;
     }
 
@@ -100,18 +87,15 @@ impl Noise {
     }
 
     fn write_nr44(&mut self, byte: u8) {
-        let new_length_enabled = byte & 0x40 != 0;
-        println!("{:02x}", byte);
-        if byte & 0x80 != 0 {
-            if self.dac_on {
-                self.channel_on = true;
-                self.length_counter.on_trigger();
-            }
+        if self.nr44 & 0x80 != 0 {
+            self.length_counter.on_trigger();
             self.envelope.on_trigger();
             self.lfsr.shift_register = 0xFFFF;
         }
-        self.channel_on = self.length_counter.extra_clocking(new_length_enabled);
-        self.length_counter.enabled = new_length_enabled;
+
+        let new_length_enabled = byte & 0x40 != 0;
+        self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.set_tick_enable(new_length_enabled);
         self.nr44 = byte
     }
 }
