@@ -41,7 +41,6 @@ pub struct Bus {
     interrupt_flag: u8,
 
     pub serial_output: String,
-    div_apu_tick: bool,
     dma_start: u16,
     dma_ticks: u16,
 }
@@ -60,7 +59,6 @@ impl Bus {
             interrupt_flag: 0xE0,
 
             serial_output: String::new(),
-            div_apu_tick: false,
             dma_start: 0,
             dma_ticks: DMA_CYCLES,
         }
@@ -69,28 +67,6 @@ impl Bus {
     pub fn with_audio(mut self, sdl: Sdl) -> Self {
         self.apu = Apu::new(Some(sdl));
         self
-    }
-
-    /// Steps through other components to be done at the END OF EACH INTSTRUCTION.
-    /// Updates interrupt flags accordingly.
-    pub fn step(&mut self, cycles: u8, remaining_cycles: u8) {
-
-        self.partial_step(remaining_cycles);
-
-        self.apu.step(cycles as u32, self.div_apu_tick);
-        self.div_apu_tick = false;
-        
-        self.ppu.step(cycles);
-
-        if self.ppu.entered_vblank {
-            self.request_interrupt(Interrupt::VBlank);
-        }
-        if self.ppu.stat_triggered {
-            self.request_interrupt(Interrupt::Stat)
-        }
-        if self.joypad.interrupt {
-            self.request_interrupt(Interrupt::Joypad)
-        }
     }
 
     /// Steps through components; to be MID INSTRUCTION for every bus read/write, 
@@ -105,7 +81,31 @@ impl Bus {
         if self.timer.step(cycles) {
             self.request_interrupt(Interrupt::Timer)
         }
-        self.div_apu_tick |= old_div & 0x10 != 0 && self.timer.div & 0x10 == 0;
+        
+        if old_div & 0x10 != 0 && self.timer.div & 0x10 == 0 {
+            self.apu.frame_sequencer_step();
+        }
+    }
+
+    /// Steps through other components to be done at the END OF EACH INTSTRUCTION.
+    /// Updates interrupt flags accordingly.
+    pub fn step(&mut self, cycles: u8, remaining_cycles: u8) {
+
+        self.partial_step(remaining_cycles);
+
+        self.apu.step(cycles as u32);
+        
+        self.ppu.step(cycles);
+
+        if self.ppu.entered_vblank {
+            self.request_interrupt(Interrupt::VBlank);
+        }
+        if self.ppu.stat_triggered {
+            self.request_interrupt(Interrupt::Stat)
+        }
+        if self.joypad.interrupt {
+            self.request_interrupt(Interrupt::Joypad)
+        }
     }
 
     /// Returns byte from specified address; returns 0xFF for unused addresses.

@@ -22,36 +22,8 @@ const AUDIO_SAMPLES: usize = 2048;
 
 const MASTER_VOLUME: f32 = 0.2;
 
-struct Callback {
-    audio_rx: Receiver<[[f32; 2]; AUDIO_SAMPLES]>,
-    prev_sample: [f32; 2],
-}
-
-impl AudioCallback for Callback {
-    type Channel = f32;
-
-    fn callback(&mut self, stream: &mut [f32]) {
-        match self.audio_rx.recv_timeout(Duration::from_millis(30)) {
-            Ok(buffer) => {
-                for i in 0..buffer.len() {
-                    stream[i * 2] = buffer[i][0];
-                    stream[i * 2 + 1] = buffer[i][1];
-                }
-            
-                self.prev_sample = buffer[buffer.len() - 1];
-            }
-            Err(_) => {
-                for i in 0..stream.len() {
-                    stream[i] = self.prev_sample[i % 2];
-                }
-            }
-        }
-
-        for i in 0..stream.len() {
-            stream[i] *= MASTER_VOLUME
-        }
-    }
-}
+const WAVE_RAM_START: usize = 0xFF30;
+const WAVE_RAM_END: usize = 0xFF3F;
 
 pub struct Apu {
     audio_tx: Option<SyncSender<[[f32; 2]; AUDIO_SAMPLES]>>,
@@ -121,26 +93,27 @@ impl Apu {
         }
     }
 
-    pub fn step(&mut self, cycles: u32, div_apu_tick: bool) {
+    pub fn frame_sequencer_step(&mut self) {
         if !self.apu_on {
             return;
         }
 
-        self.pulse1.step(div_apu_tick);
-        self.pulse2.step(div_apu_tick);
-        self.wave  .step(div_apu_tick);
-        self.noise .step(div_apu_tick);
+        self.pulse1.frame_sequencer_step();
+        self.pulse2.frame_sequencer_step();
+        self.wave  .frame_sequencer_step();
+        self.noise .frame_sequencer_step();
+    }
+
+    pub fn step(&mut self, cycles: u32) {
+        if !self.apu_on {
+            return;
+        }
         
         for _ in 0..cycles {
             let pulse1_sample = self.pulse1.make_sample();
             let pulse2_sample = self.pulse2.make_sample();
             let wave_sample = self.wave.make_sample();
             let noise_sample = self.noise.make_sample();
-
-            // let pulse1_sample = 0.0;
-            // let pulse2_sample = 0.0;
-            // let wave_sample = 0.0;
-            // let noise_sample = 0.0;
             
             if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
                 self.sample_gather = 0;
@@ -168,21 +141,27 @@ impl Apu {
             self.sample_gather += 1;
         }
 
-        if self.buffer_index >= AUDIO_SAMPLES {
-            match &mut self.audio_tx {
-                Some(audio_tx) => {
-                    let mut res = [[0.0; 2]; AUDIO_SAMPLES];
-                    res.copy_from_slice(&self.audio_buffer[0..AUDIO_SAMPLES]);
-                    for i in AUDIO_SAMPLES..self.buffer_index {
-                        self.audio_buffer[i - AUDIO_SAMPLES] = self.audio_buffer[i];
-                    }
-                    self.buffer_index -= AUDIO_SAMPLES;
+        self.push_buffer_samples();
+    }
 
-                    audio_tx.send(res).unwrap();
+    pub fn push_buffer_samples(&mut self) {
+        if self.buffer_index < AUDIO_SAMPLES {
+            return;
+        }
+
+        match &mut self.audio_tx {
+            Some(audio_tx) => {
+                let mut res = [[0.0; 2]; AUDIO_SAMPLES];
+                res.copy_from_slice(&self.audio_buffer[0..AUDIO_SAMPLES]);
+                for i in AUDIO_SAMPLES..self.buffer_index {
+                    self.audio_buffer[i - AUDIO_SAMPLES] = self.audio_buffer[i];
                 }
-                None => {
-                    self.buffer_index = 0;
-                }
+                self.buffer_index -= AUDIO_SAMPLES;
+
+                audio_tx.send(res).unwrap();
+            }
+            None => {
+                self.buffer_index = 0;
             }
         }
     }
@@ -200,13 +179,15 @@ impl Apu {
             0xFF24 => self.nr50,
             0xFF25 => self.nr51,
             0xFF26 => self.read_nr52(),
-            0xFF30..=0xFF3F => self.wave.read(addr),
+            WAVE_RAM_START..=WAVE_RAM_END => self.wave.read_wave_ram(addr),
             _ => 0xFF
         }
     }
 
     pub fn write_io(&mut self, addr: usize, byte: u8) {
-        if !self.apu_on && addr != 0xFF26 {
+        // (for DMG only) NR52 and all length counters are preserved and writable while APU is powered off
+        let apu_off_readable = vec![0xFF26, 0xFF11, 0xFF16, 0xFF1B, 0xFF20];
+        if !self.apu_on && !apu_off_readable.contains(&addr) {
             return;
         }
 
@@ -218,7 +199,7 @@ impl Apu {
             0xFF24 => self.nr50 = byte,
             0xFF25 => self.nr51 = byte,
             0xFF26 => self.write_nr52(byte),
-            0xFF30..=0xFF3F => self.wave.write(addr, byte),
+            WAVE_RAM_START..=WAVE_RAM_END => self.wave.write_wave_ram(addr, byte),
             _ => {}
         };
     }
@@ -233,28 +214,116 @@ impl Apu {
     }
 
     fn write_nr52(&mut self, byte: u8) {
-        if (byte & 0x80) ^ (self.nr52 & 0x80) != 0 {
+        if (byte ^ self.nr52) & 0x80 != 0 {
             if byte & 0x80 == 0 {
                 self.turn_off_apu();
             } else {
                 self.turn_on_apu();
             }
         }
+
         self.nr52 = byte & 0x80;
     }
 
     fn turn_on_apu(&mut self) {
         self.apu_on = true;
+        self.pulse1.power_on();
+        self.pulse2.power_on();
+        self.wave.power_on();
+        self.noise.power_on();
     }
 
     fn turn_off_apu(&mut self) {
         self.apu_on = false;
-        self.nr51 = 0;
         self.nr50 = 0;
-        self.pulse1 = Pulse::new(true);
-        self.pulse2 = Pulse::new(false);
-        self.wave = self.wave.reset();
-        self.noise = Noise::new();
+        self.nr51 = 0;
+        self.pulse1.power_off();
+        self.pulse2.power_off();
+        self.wave.power_off();
+        self.noise.power_off();
     }
 
+}
+
+struct Callback {
+    audio_rx: Receiver<[[f32; 2]; AUDIO_SAMPLES]>,
+    prev_sample: [f32; 2],
+}
+
+impl AudioCallback for Callback {
+    type Channel = f32;
+
+    fn callback(&mut self, stream: &mut [f32]) {
+        match self.audio_rx.recv_timeout(Duration::from_millis(30)) {
+            Ok(buffer) => {
+                for i in 0..buffer.len() {
+                    stream[i * 2] = buffer[i][0];
+                    stream[i * 2 + 1] = buffer[i][1];
+                }
+            
+                self.prev_sample = buffer[buffer.len() - 1];
+            }
+            Err(_) => {
+                for i in 0..stream.len() {
+                    stream[i] = self.prev_sample[i % 2];
+                }
+            }
+        }
+
+        for i in 0..stream.len() {
+            stream[i] *= MASTER_VOLUME
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{bus::{RAM_END, RAM_START}, cartridge::Cartridge, cpu::Cpu};
+
+    const DMG_SOUND: &str = "roms/tests/dmg_sound.gb";
+    const TEST_NUMS: [&str; 12] = [
+        "01:", "02:", "03:", "04:", 
+        "05:", "06:", "07:", "08:", 
+        "09:", "10:", "11:", "12:", 
+    ];
+
+    #[test]
+    fn apu_dmg_sound_test() {
+        let mut cartridge = Cartridge::from_file(DMG_SOUND, false);
+        for i in RAM_START..RAM_END {
+            cartridge.write_ram(i, 0);
+        }
+        let mut cpu = Cpu::new(cartridge);
+    
+        let mut cycles: u64 = 0;
+        let mut test_num = 1;
+        while cycles < (1 << 32) {
+            cycles += cpu.step() as u64;
+
+            if cycles % (1 << 18) == 0 {
+                let mut output = String::new();
+
+                for i in RAM_START..RAM_END {
+                    let byte = cpu.bus.read_byte(i as u16);
+                    if byte != 0 {
+                        output.push(char::from(byte));
+                    }
+                }
+
+                if output.contains(TEST_NUMS[test_num - 1]) {
+                    let mut pass_output = String::from(TEST_NUMS[test_num - 1]);
+                    pass_output.push_str("ok");
+                    if output.contains(&pass_output) {
+                        println!("dmg_sound: Test #{} Passed", test_num);
+                        test_num += 1;
+                        if test_num > 12 {
+                            break;
+                        }
+                    } else {
+                        panic!("dmg_sound: Test #{} Failed", test_num);
+                    }
+                }
+            }
+        } 
+    }
 }

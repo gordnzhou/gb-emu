@@ -19,28 +19,28 @@ impl Envelope {
         }
     }
 
-    pub fn step(&mut self, div_apu_tick: u8) {
-        self.fs_ticks += div_apu_tick;
-        if self.fs_ticks < 8 { return; }
-        self.fs_ticks = 0;
+    pub fn step(&mut self) {
+        self.fs_ticks = self.fs_ticks.wrapping_add(1);
+        if self.fs_ticks % 8 == 0 {
 
-        if self.sweep_pace == 0 {
-            return;
-        }
-
-        self.sweep_ticks += 1;
-
-        if self.sweep_ticks == self.sweep_pace {
-            self.sweep_ticks = 0;
-
-            let next_volume = if self.envelope_up {
-                self.cur_volume as i8 + 1
-            } else {
-                self.cur_volume as i8 - 1
-            };
-
-            if 0x0 <= next_volume && next_volume <= 0xF {
-                self.cur_volume = next_volume as u8;
+            if self.sweep_pace == 0 {
+                return;
+            }
+    
+            self.sweep_ticks += 1;
+    
+            if self.sweep_ticks == self.sweep_pace {
+                self.sweep_ticks = 0;
+    
+                let next_volume = if self.envelope_up {
+                    self.cur_volume as i8 + 1
+                } else {
+                    self.cur_volume as i8 - 1
+                };
+    
+                if 0x0 <= next_volume && next_volume <= 0xF {
+                    self.cur_volume = next_volume as u8;
+                }
             }
         }
     }

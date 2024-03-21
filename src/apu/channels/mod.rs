@@ -11,3 +11,4 @@ use super::Envelope;
 use super::Sweep;
 use super::Apu;
 use super::MAX_PERIOD;
+use super::WAVE_RAM_START;

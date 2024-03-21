@@ -24,6 +24,7 @@ pub struct Pulse {
     dac_on: bool,
     duty_index: usize,
     freq_counter: u32,
+    power_on: bool,
 }
 
 impl Pulse {
@@ -38,14 +39,38 @@ impl Pulse {
             nrx1: 0,
             nrx2: 0,
             nrx3: 0,
-            nrx4: 0,
+            nrx4: 0x80,
             length_counter: LengthCounter::new(LENGTH_TICKS),
             envelope: Envelope::new(),
             sweep,
             dac_on: false,
             duty_index: 0,
             freq_counter: 0,
+            power_on: false,
         }
+    }
+
+    pub fn power_off(&mut self) {
+        self.power_on = false;
+        self.nrx0 = 0;
+        self.nrx1 = 0;
+        self.nrx2 = 0;
+        self.nrx3 = 0;
+        self.nrx4 = 0;
+        self.length_counter = LengthCounter::new(LENGTH_TICKS);
+        self.envelope = Envelope::new();
+        self.dac_on = false;
+        self.duty_index = 0;
+        self.freq_counter = 0;
+
+        match &mut self.sweep {
+            Some(_) => self.sweep = Some(Sweep::new()),
+            None => {}
+        }
+    }
+
+    pub fn power_on(&mut self) {
+        self.power_on = true;
     }
 
     pub fn make_sample(&mut self) -> f32 {
@@ -65,12 +90,12 @@ impl Pulse {
         Apu::to_analog(sample * self.envelope.volume())
     }
 
-    pub fn step(&mut self, div_apu_tick: bool) {
-        self.length_counter.tick(div_apu_tick as u8);
-        self.envelope.step(div_apu_tick as u8);
+    pub fn frame_sequencer_step(&mut self) {
+        self.length_counter.tick();
+        self.envelope.step();
 
         match &mut self.sweep {
-            Some(sweep) => if !sweep.step(div_apu_tick as u8,&mut self.nrx3, &mut self.nrx4) {
+            Some(sweep) => if !sweep.step(&mut self.nrx3, &mut self.nrx4) {
                 self.length_counter.turn_off_channel();
             },
             None => {}
@@ -108,22 +133,31 @@ impl Pulse {
     }
 
     fn write_nrx0(&mut self, byte: u8) {
+        self.nrx0 = byte;
         match &mut self.sweep {
-            Some(sweep) => sweep.set(byte),
+            Some(sweep) => if !sweep.set(byte) {
+                self.length_counter.turn_off_channel();
+            },
             None => {}
         }
-        self.nrx0 = byte
     }
 
     fn write_nrx1(&mut self, byte: u8) {
-        self.nrx1 = byte;
+        if self.power_on {
+            self.nrx1 = byte;
+        }
         self.length_counter.set_ticks(byte);
     }
 
     fn write_nrx2(&mut self, byte: u8) {
-        self.dac_on = byte & 0xF8 != 0;
-        self.envelope.set(byte);
         self.nrx2 = byte;
+
+        self.envelope.set(byte);
+        self.dac_on = byte & 0xF8 != 0;
+
+        if !self.dac_on {
+            self.length_counter.turn_off_channel();
+        };
     }
 
     fn write_nrx3(&mut self, byte: u8) {
@@ -136,26 +170,29 @@ impl Pulse {
     }
 
     fn write_nrx4(&mut self, byte: u8) {
+        self.nrx4 = byte;
+
         let new_length_enabled = byte & 0x40 != 0;
-        if self.nrx4 & 0x80 != 0 {
+        self.length_counter.extra_clocking(new_length_enabled);
+        self.length_counter.set_tick_enable(new_length_enabled);
+
+        if byte & 0x80 != 0 {
             self.length_counter.on_trigger();
             self.duty_index = 0;
             self.envelope.on_trigger();
             self.freq_counter = 0;
-
-            match &mut self.sweep {
-                Some(sweep) => { sweep.on_trigger(); },
-                None => {}
-            }
         }
-        self.length_counter.extra_clocking(new_length_enabled);
-        self.length_counter.set_tick_enable(new_length_enabled);
-
-        self.nrx4 = byte;
 
         let new_period = self.period_value();
         match &mut self.sweep {
-            Some(sweep) => sweep.set_period(new_period),
+            Some(sweep) => {
+                sweep.set_period(new_period);
+                if byte & 0x80 != 0 { 
+                    if !sweep.on_trigger() {
+                        self.length_counter.turn_off_channel();
+                    }
+                }
+            },
             None => {}
         }
     }

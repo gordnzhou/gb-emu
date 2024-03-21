@@ -11,6 +11,7 @@ pub struct Noise {
     lfsr: Lfsr,
     envelope: Envelope,
     dac_on: bool,
+    power_on: bool,
 }
 
 impl Noise {
@@ -19,12 +20,29 @@ impl Noise {
             nr41: 0,
             nr42: 0,
             nr43: 0, 
-            nr44: 0,
+            nr44: 0xBF,
             length_counter: LengthCounter::new(LENGTH_TICKS),
             lfsr: Lfsr::new(),
             envelope: Envelope::new(),
             dac_on: false,
+            power_on: false,
         }
+    }
+
+    pub fn power_off(&mut self) {
+        self.power_on = false;
+        self.nr41 = 0;
+        self.nr42 = 0;
+        self.nr43 = 0;
+        self.nr44 = 0;
+        self.length_counter = LengthCounter::new(LENGTH_TICKS);
+        self.lfsr = Lfsr::new();
+        self.envelope = Envelope::new();
+        self.dac_on = false;
+    }
+
+    pub fn power_on(&mut self) {
+        self.power_on = true;
     }
 
     pub fn make_sample(&mut self) -> f32 {
@@ -35,9 +53,9 @@ impl Noise {
         Apu::to_analog(sample * self.envelope.volume())
     }
 
-    pub fn step(&mut self, div_apu_tick: bool) {
-        self.length_counter.tick(div_apu_tick as u8);
-        self.envelope.step(div_apu_tick as u8);
+    pub fn frame_sequencer_step(&mut self) {
+        self.length_counter.tick();
+        self.envelope.step();
     }
 
     pub fn channel_on(&self) -> bool {
@@ -69,34 +87,42 @@ impl Noise {
     }
 
     fn write_nr41(&mut self, byte: u8) {
-        self.nr41 = byte;
+        if self.power_on {
+            self.nr41 = byte;
+        }
         self.length_counter.set_ticks(byte)
     }
 
     fn write_nr42(&mut self, byte: u8) {
-        self.dac_on = byte & 0xF8 != 0 ;
-        self.envelope.set(byte);
         self.nr42 = byte;
+
+        self.envelope.set(byte);
+        self.dac_on = byte & 0xF8 != 0;
+
+        if !self.dac_on {
+            self.length_counter.turn_off_channel();
+        };
     }
 
     fn write_nr43(&mut self, byte: u8) {
+        self.nr43 = byte;
         self.lfsr.divisor_code = byte & 7;
         self.lfsr.width = byte & 8 != 0;
         self.lfsr.shift_amount = (byte & 0xF0) >> 4;
-        self.nr43 = byte;
     }
 
     fn write_nr44(&mut self, byte: u8) {
-        if self.nr44 & 0x80 != 0 {
-            self.length_counter.on_trigger();
-            self.envelope.on_trigger();
-            self.lfsr.shift_register = 0xFFFF;
-        }
+        self.nr44 = byte;
 
         let new_length_enabled = byte & 0x40 != 0;
         self.length_counter.extra_clocking(new_length_enabled);
         self.length_counter.set_tick_enable(new_length_enabled);
-        self.nr44 = byte
+
+        if byte & 0x80 != 0 {
+            self.length_counter.on_trigger();
+            self.envelope.on_trigger();
+            self.lfsr.shift_register = 0xFFFF;
+        }
     }
 }
 

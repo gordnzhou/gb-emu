@@ -13,7 +13,7 @@ use cartridge::Cartridge;
 use cpu::Cpu;
 use emulator::Emulator;
 
-const ROM_PATH: &str = "roms/mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb";
+const ROM_PATH: &str = "roms/tests/dmg_sound.gb";
 
 const SCREEN_SCALE: i32 = 5;
 

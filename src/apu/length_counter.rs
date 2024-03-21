@@ -18,13 +18,16 @@ impl LengthCounter {
     }
 
     /// Ticks LengthCounter, updating channel status if length expires
-    pub fn tick(&mut self, div_apu_tick: u8) {
-        self.fs_ticks = self.fs_ticks.wrapping_add(div_apu_tick);
+    pub fn tick(&mut self) {
+        self.fs_ticks = self.fs_ticks.wrapping_add(1);
         if self.fs_ticks % 2 == 0 {
 
             if self.enabled && self.ticks > 0 {
                 self.ticks -= 1;
-                self.channel_on = self.ticks == 0;
+                
+                if self.ticks == 0 {
+                    self.channel_on = false;
+                }
             }
         } 
     }
@@ -37,12 +40,21 @@ impl LengthCounter {
         self.channel_on = true;
         if self.ticks == 0 {
             self.ticks = self.max_ticks;
+
+            // Obscure Behavior: On a trigger, if the frame sequencer's next tick 
+            // does not clock the counter and length enable bit is set, reloads the 
+            // counter with MAX_TICKS - 1 instead of MAX_TICKS
+            if self.fs_ticks % 2 == 0 && self.enabled {
+                self.ticks = self.max_ticks - 1;
+            }
         }
     }
 
-    /// SOURCE: https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware (under "Obscure Behavior")
+    /// Obscure Behavior (DMG only): If the frame sequencer's next tick does not clock the counter and
+    /// length enable bit goes from 0 to 1, decrements counter if counter is not zero; 
+    /// channel is disabled if counter reached zero
     pub fn extra_clocking(&mut self, new_enabled: bool){
-        if self.fs_ticks == 0 && !self.enabled && new_enabled && self.ticks > 0 {
+        if self.ticks > 0 && self.fs_ticks % 2 == 0 && !self.enabled && new_enabled {
             self.ticks -= 1;
 
             if self.ticks == 0 {

@@ -1,8 +1,6 @@
 /target
 Cargo.lock
-/roms
 /.vscode
 /DS_Store
 /logs
 .DS_Store
-/saves
