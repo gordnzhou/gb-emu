@@ -1,4 +1,4 @@
-use sdl2::{Sdl, VideoSubsystem};
+use sdl2::Sdl;
 use sdl2::video::Window;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture};
@@ -8,7 +8,7 @@ use sdl2::keyboard::Keycode;
 use sdl2::EventPump;
 
 use crate::cartridge::Cartridge;
-use crate::cpu::Cpu;
+use crate::cpu::{Cpu, GBModel};
 
 // in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
 pub const KEYMAPPINGS: [Keycode; 8] = [
@@ -46,31 +46,31 @@ pub struct Emulator {
 
 impl Emulator {
     /// Loads in given cartridge and initializes Gameboy emulator.
-    pub fn load_cartridge(screen_scale: i32, cartrige: Cartridge) -> Result<Self, String> {
+    pub fn load_cartridge(screen_scale: i32, cartridge: Cartridge) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
 
-        let video_subsystem = sdl_context.video()?;
-        let window = Emulator::build_window(video_subsystem, screen_scale as u32)?;
-        let mut canvas: Canvas<Window> = window
-            .into_canvas()
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        let title = &format!("Playing: {}", &cartrige.get_title());
-        canvas.window_mut().set_title(title).unwrap();
-
+        let window_title = &cartridge.get_title();
+        let canvas = Emulator::build_canvas(&sdl_context, screen_scale as u32, window_title)?;
         let event_pump = sdl_context.event_pump()?;
+
+        let model = if cartridge.cgb_compatible() {
+            GBModel::CGB
+        } else {
+            GBModel::DMG
+        };
+        println!("detected model: {:?}", model);
 
         Ok(Emulator {
             event_pump,
             canvas,
             screen_scale,
             key_status: 0xFF,
-            cpu: Cpu::new(cartrige).with_audio(sdl_context),
+            cpu: Cpu::new(cartridge, model).with_audio(sdl_context),
         })
     }
 
-    fn build_window(video_subsystem: VideoSubsystem, scale: u32) -> Result<Window, String> {
+    fn build_canvas(sdl_context: &Sdl, scale: u32, title: &str) -> Result<Canvas<Window>, String> {
+        let video_subsystem = sdl_context.video()?;
         let window_width = LCD_WIDTH as u32 * scale;
         let window_height = LCD_HEIGHT as u32 * scale;
 
@@ -82,7 +82,15 @@ impl Emulator {
             .map_err(|e| e.to_string())?;
 
         println!("Created window of width {} and height {}", window_width, window_height);
-        Ok(window)
+
+        let mut canvas: Canvas<Window> = window
+            .into_canvas()
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let title = &format!("Playing: {}", title);
+        canvas.window_mut().set_title(title).unwrap();
+        Ok(canvas)
     }
 
     /// Runs the emulator for the specified number of nanoseconds.

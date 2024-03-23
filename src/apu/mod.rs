@@ -9,6 +9,7 @@ use std::time::Duration;
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::{AudioSubsystem, Sdl};
 
+use crate::cpu::GBModel;
 use crate::emulator::CYCLE_HZ;
 use self::channels::*;
 use envelope::Envelope;
@@ -26,9 +27,15 @@ const WAVE_RAM_START: usize = 0xFF30;
 const WAVE_RAM_END: usize = 0xFF3F;
 
 pub struct Apu {
+    model: GBModel,
+    apu_on: bool,
     audio_tx: Option<SyncSender<[[f32; 2]; AUDIO_SAMPLES]>>,
     _audio_subsystem: Option<AudioSubsystem>,
     _audio_device: Option<AudioDevice<Callback>>,
+    pulse1: Pulse,
+    pulse2: Pulse,
+    wave: Wave,
+    noise: Noise,
     audio_buffer: [[f32; 2]; AUDIO_SAMPLES * 4],
     buffer_index: usize,
     sample_gather: u32,
@@ -36,16 +43,12 @@ pub struct Apu {
     nr51: u8,
     nr50: u8,
 
-    pulse1: Pulse,
-    pulse2: Pulse,
-    wave: Wave,
-    noise: Noise,
-
-    apu_on: bool,
+    pcm12: u8,
+    pcm34: u8,
 }
 
 impl Apu {
-    pub fn new(sdl: Option<Sdl>) -> Self {
+    pub fn new(sdl: Option<Sdl>, model: GBModel) -> Self {
         let mut audio_tx = None;
         let mut _audio_subsystem = None;
         let mut _audio_device = None;
@@ -74,9 +77,15 @@ impl Apu {
         }
 
         Apu { 
+            model,
+            apu_on: true,
             audio_tx,
             _audio_device,
             _audio_subsystem,
+            pulse1: Pulse::new(true),
+            pulse2: Pulse::new(false),
+            wave: Wave::new(),
+            noise: Noise::new(),
             audio_buffer: [[0.0; 2]; AUDIO_SAMPLES * 4],
             buffer_index: 0,
             sample_gather: 0,
@@ -84,12 +93,8 @@ impl Apu {
             nr51: 0,
             nr50: 0,
 
-            pulse1: Pulse::new(true),
-            pulse2: Pulse::new(false),
-            wave: Wave::new(),
-            noise: Noise::new(),
-
-            apu_on: true,
+            pcm12: 0,
+            pcm34: 0,
         }
     }
 
@@ -114,37 +119,51 @@ impl Apu {
             let pulse2_sample = self.pulse2.make_sample();
             let wave_sample = self.wave.make_sample();
             let noise_sample = self.noise.make_sample();
+
+            if matches!(self.model, GBModel::CGB) {
+                self.pcm12 = (pulse2_sample << 4) | pulse1_sample;
+                self.pcm34 = (noise_sample << 4) | wave_sample; 
+            }
             
             if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
-                self.sample_gather = 0;
-
-                let mut right_sample = 0.0;
-                if self.nr51 & 0x01 != 0 { right_sample += pulse1_sample }
-                if self.nr51 & 0x02 != 0 { right_sample += pulse2_sample }
-                if self.nr51 & 0x04 != 0 { right_sample += wave_sample   }
-                if self.nr51 & 0x08 != 0 { right_sample += noise_sample  }
-                right_sample /= (self.nr51 & 0x0F).count_ones() as f32;
-                right_sample *= ((self.nr50 & 7) + 1) as f32 / 8.0;
-
-                let mut left_sample = 0.0;
-                if self.nr51 & 0x10 != 0 { left_sample += pulse1_sample }
-                if self.nr51 & 0x20 != 0 { left_sample += pulse2_sample }
-                if self.nr51 & 0x40 != 0 { left_sample += wave_sample   }
-                if self.nr51 & 0x80 != 0 { left_sample += noise_sample  }
-                left_sample /= (self.nr51 & 0xF0).count_ones() as f32;
-                left_sample *= (((self.nr50 >> 4) & 7) + 1) as f32 / 8.0;
-
-                self.audio_buffer[self.buffer_index][0] = left_sample;
-                self.audio_buffer[self.buffer_index][1] = right_sample;
-                self.buffer_index += 1;
+                self.push_samples_to_buffer(pulse1_sample, pulse2_sample, wave_sample, noise_sample)
             }
             self.sample_gather += 1;
         }
 
-        self.push_buffer_samples();
+        self.push_to_callback();
     }
 
-    pub fn push_buffer_samples(&mut self) {
+    fn push_samples_to_buffer(&mut self, pulse1_sample: u8, pulse2_sample: u8, wave_sample: u8, noise_sample: u8) {
+        let pulse1_sample = Apu::to_analog(pulse1_sample);
+        let pulse2_sample = Apu::to_analog(pulse2_sample);
+        let wave_sample = Apu::to_analog(wave_sample);
+        let noise_sample = Apu::to_analog(noise_sample);
+
+        self.sample_gather = 0;
+
+        let mut right_sample = 0.0;
+        if self.nr51 & 0x01 != 0 { right_sample += pulse1_sample }
+        if self.nr51 & 0x02 != 0 { right_sample += pulse2_sample }
+        if self.nr51 & 0x04 != 0 { right_sample += wave_sample   }
+        if self.nr51 & 0x08 != 0 { right_sample += noise_sample  }
+        right_sample /= (self.nr51 & 0x0F).count_ones() as f32;
+        right_sample *= ((self.nr50 & 7) + 1) as f32 / 8.0;
+
+        let mut left_sample = 0.0;
+        if self.nr51 & 0x10 != 0 { left_sample += pulse1_sample }
+        if self.nr51 & 0x20 != 0 { left_sample += pulse2_sample }
+        if self.nr51 & 0x40 != 0 { left_sample += wave_sample   }
+        if self.nr51 & 0x80 != 0 { left_sample += noise_sample  }
+        left_sample /= (self.nr51 & 0xF0).count_ones() as f32;
+        left_sample *= (((self.nr50 >> 4) & 7) + 1) as f32 / 8.0;
+
+        self.audio_buffer[self.buffer_index][0] = left_sample;
+        self.audio_buffer[self.buffer_index][1] = right_sample;
+        self.buffer_index += 1;
+    }
+
+    fn push_to_callback(&mut self) {
         if self.buffer_index < AUDIO_SAMPLES {
             return;
         }
@@ -180,6 +199,9 @@ impl Apu {
             0xFF25 => self.nr51,
             0xFF26 => self.read_nr52(),
             WAVE_RAM_START..=WAVE_RAM_END => self.wave.read_wave_ram(addr),
+
+            0xFF76 => self.pcm12,
+            0xFF77 => self.pcm34,
             _ => 0xFF
         }
     }
@@ -293,7 +315,7 @@ mod tests {
         for i in RAM_START..RAM_END {
             cartridge.write_ram(i, 0);
         }
-        let mut cpu = Cpu::new(cartridge);
+        let mut cpu = Cpu::new(cartridge, crate::cpu::GBModel::DMG);
     
         let mut cycles: u64 = 0;
         let mut test_num = 1;

@@ -1,4 +1,4 @@
-use super::{Apu, LengthCounter, MAX_PERIOD, WAVE_RAM_START};
+use super::{LengthCounter, MAX_PERIOD, WAVE_RAM_START};
 
 const WAVE_RAM_SIZE: usize = 16;
 const LENGTH_TICKS: u32 = 256;
@@ -56,9 +56,9 @@ impl Wave {
         self.power_on = true;
     }
 
-    pub fn make_sample(&mut self) -> f32 {
+    pub fn make_sample(&mut self) -> u8 {
         if !self.length_counter.channel_on() || !self.dac_on {
-            return 0.0;
+            return 0;
         }
 
         let volume = match (self.nr32 & 0x60) >> 5 {
@@ -92,7 +92,7 @@ impl Wave {
             self.sample_buffer & 0x0F
         };
 
-        Apu::to_analog(sample_nibble >> volume)
+        sample_nibble >> volume
     }
 
     pub fn frame_sequencer_step(&mut self) {

@@ -1,4 +1,4 @@
-use super::{Apu, Envelope, LengthCounter};
+use super::{Envelope, LengthCounter};
 
 const LENGTH_TICKS: u32 = 64;
 
@@ -45,12 +45,12 @@ impl Noise {
         self.power_on = true;
     }
 
-    pub fn make_sample(&mut self) -> f32 {
+    pub fn make_sample(&mut self) -> u8 {
         if !self.length_counter.channel_on() || !self.dac_on {
-            return 0.0;
+            return 0;
         }
         let sample = self.lfsr.next_sample();
-        Apu::to_analog(sample * self.envelope.volume())
+        sample * self.envelope.volume()
     }
 
     pub fn frame_sequencer_step(&mut self) {

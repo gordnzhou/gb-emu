@@ -9,7 +9,6 @@ const LOGO_BYTES: usize = 0x30;
 const CGB_ENHANCED: u8 = 0x80;
 const CGB_ONLY: u8 = 0xC0;
 
-#[derive(Hash)]
 pub struct Header {
     pub nintendo_logo: [u8; LOGO_BYTES],
     pub manufacturer_code: String,
@@ -136,4 +135,7 @@ impl Header {
         self.cartridge_type
     }
 
+    pub fn cgb_compatible(&self) -> bool {
+        self.cgb_flag & 0x80 !=  0
+    }
 }

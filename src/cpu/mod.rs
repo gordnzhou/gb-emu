@@ -9,8 +9,15 @@ use self::Interrupt::*;
 use crate::bus::Bus;
 use crate::cartridge::Cartridge;
 
+#[derive(Clone, Copy, Debug)]
+pub enum GBModel {
+    DMG,
+    CGB
+}
+
 pub struct Cpu {
     pub bus: Bus,
+    model: GBModel,
 
     pub(self) scheduled_ei: bool,
     pub(self) ime: bool,
@@ -25,6 +32,10 @@ pub struct Cpu {
     pub(self) hl: Register,
     pub(self) pc: Register,
     pub(self) sp: Register,
+
+    // CGB ONLY
+    double_speed: bool,
+    do_speed_switch: bool,
 }
 
 pub enum Interrupt {
@@ -36,10 +47,14 @@ pub enum Interrupt {
 }
 
 impl Cpu {
-    pub fn new(cartridge: Cartridge) -> Self {
+    pub fn new(cartridge: Cartridge, model: GBModel) -> Self {
+        assert!(!(matches!(model, GBModel::CGB) && !cartridge.cgb_compatible()), 
+            "This cartridge is not compatible with CGB functions!");
+
         if cartridge.has_bootrom() {
             Cpu { 
-                bus: Bus::new(cartridge),
+                bus: Bus::new(cartridge, model),
+                model,
                 scheduled_ei: false,
                 ime: false,
                 halted: false,
@@ -52,14 +67,17 @@ impl Cpu {
                 hl: Register(0),
                 pc: Register(0),
                 sp: Register(0),
+                double_speed: false,
+                do_speed_switch: false,
             }
         } else {
-            let mut bus = Bus::new(cartridge);
+            let mut bus = Bus::new(cartridge, model);
             bus.ppu.write_io(0xFF40, 0x91);
             bus.ppu.write_io(0xFF41, 0x81);
 
             Cpu { 
                 bus,
+                model,
                 scheduled_ei: false,
                 ime: false,
                 halted: false,
@@ -72,6 +90,8 @@ impl Cpu {
                 hl: Register(0x014D),
                 pc: Register(0x0100),
                 sp: Register(0xFFFE),
+                double_speed: false,
+                do_speed_switch: false
             }
         }
     }
@@ -84,12 +104,20 @@ impl Cpu {
     /// Steps through all parts of the emulator over the period
     /// that the next CPU instruction will take; returns that period's length in M-cycles.
     pub fn step(&mut self) -> u8 {
-        let cycles = self.cycle();
-
-        if cycles > 0 {
-            self.bus.step(cycles, cycles - self.cycles_so_far);
+        let mut cycles = self.cycle();
+        if self.double_speed {
+            cycles += self.cycle();
+            cycles /= 2;
         }
-        self.cycles_so_far = 0;
+
+        if matches!(self.model, GBModel::CGB) && self.do_speed_switch {
+            self.do_speed_switch = false;
+            self.double_speed = !self.double_speed;
+            // TODO: implement pausing after STOP instruction triggers speed switch
+            return 200 
+        }
+
+        self.bus.step(cycles);
        
         cycles
     }
@@ -122,6 +150,11 @@ impl Cpu {
             },
             None => {}
         }
+
+        if cycles > self.cycles_so_far {
+            self.bus.partial_step(cycles - self.cycles_so_far);
+        }
+        self.cycles_so_far = 0;
 
         cycles
     }

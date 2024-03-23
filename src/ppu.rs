@@ -1,6 +1,6 @@
 use std::cmp::min;
 
-use crate::emulator::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH};
+use crate::{cpu::GBModel, emulator::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH}};
 
 const TILE_SIZE: usize = 16;
 const TILE_ENTRIES: usize = 384;
@@ -34,6 +34,7 @@ enum Mode {
 }
 
 pub struct Ppu {
+    model: GBModel,
     tile_data: [[u8; TILE_SIZE]; TILE_ENTRIES],
     tile_map0: [u8; TILE_MAP_SIZE],
     tile_map1: [u8; TILE_MAP_SIZE],
@@ -55,27 +56,33 @@ pub struct Ppu {
     // displayed on canvas at 60 Hz 
     pub frame_buffer: [u8; LCD_WIDTH * LCD_HEIGHT * 4],
     pub stat_triggered: bool,
+    pub entered_vblank: bool,
     stat_line: bool,
     mode: Mode,
     mode_elapsed_dots: u32,
-
     mode_3_dots: u32,
     cur_pixel_x: usize,
     wy_cond: bool,
     wx_cond: bool,
     line_has_window: bool,
     win_counter: usize,
-
     obj_buffer_index: usize,
     obj_buffer: Vec<usize>,
-
-    pub entered_vblank: bool,
     last_vblank_scanline: u32,
+
+    // CGB_ONLY
+    vbk: u8,
+    bgpi: u8,
+    bgpd: u8,
+    obpi: u8,
+    obpd: u8,
+    opri: u8,
 }
 
 impl Ppu {
-    pub fn new() -> Self {
+    pub fn new(model: GBModel) -> Self {
         Ppu { 
+            model,
             tile_data: [[0; TILE_SIZE]; TILE_ENTRIES],
             tile_map0: [0; TILE_MAP_SIZE],
             tile_map1: [0; TILE_MAP_SIZE],
@@ -92,26 +99,28 @@ impl Ppu {
             obp1: 0,
             wy: 0,
             wx: 0,
-
             frame_buffer: [0; LCD_BYTE_WIDTH * LCD_HEIGHT],
             stat_triggered: false,
+            entered_vblank: false,
             stat_line: false,
-
             mode: Mode::VBlank1,
             mode_elapsed_dots: 0,
-
             mode_3_dots: 0,
             cur_pixel_x: 0,
             wy_cond: false,
             wx_cond: false,
             line_has_window: false,
             win_counter: 0,
-
             obj_buffer_index: 0,
             obj_buffer: Vec::new(),
-
-            entered_vblank: false,
             last_vblank_scanline: 0,
+
+            vbk: 0,
+            bgpi: 0,
+            bgpd: 0,
+            obpi: 0,
+            obpd: 0,
+            opri: 0,
         }
     }
 
@@ -435,7 +444,7 @@ impl Ppu {
         (self.mode != Mode::Drawing3 && self.mode != Mode::OamScan2)
     }
 
-    pub fn read_io(&self, addr: usize,) -> u8 {
+    pub fn read_io(&self, addr: usize) -> u8 {
         match addr {
             0xFF40 => self.lcdc,
             0xFF41 => if self.lcd_ppu_disabled() { self.stat & 0xFC } else { self.stat },
@@ -449,12 +458,20 @@ impl Ppu {
             0xFF49 => self.obp1,
             0xFF4A => self.wy,
             0xFF4B => self.wx,
+
+            0xFF4F => self.vbk,
+            0xFF68 => self.bgpi,
+            0xFF69 => self.bgpd,
+            0xFF6A => self.obpi,
+            0xFF6B => self.obpd,
+            0xFF6C => self.opri,
+            
             _ => unreachable!()
         }
     }
 
     /// Writes to PPU registers; returns true if DMA transfer is triggered.
-    pub fn write_io(&mut self, addr: usize, byte: u8) -> bool {
+    pub fn write_io(&mut self, addr: usize, byte: u8) {
         match addr {
             0xFF40 => {
                 if self.lcdc & 0x80 == 0 && byte & 0x80 != 0 {
@@ -476,10 +493,19 @@ impl Ppu {
             0xFF49 => self.obp1 = byte,
             0xFF4A => self.wy = byte,
             0xFF4B => self.wx = byte,
+
+            0xFF4F => self.vbk = byte,
+            0xFF68 => self.bgpi = byte,
+            0xFF69 => self.bgpd = byte,
+            0xFF6A => self.obpi = byte,
+            0xFF6B => self.obpd = byte,
+            0xFF6C => self.opri = byte,
             _ => unreachable!()
         };
+    }
 
-        addr == 0xFF46
+    pub fn write_dma(&mut self, byte: u8) {
+        self.dma = byte;
     }
 
     fn calc_mode_3_dots(&self) -> u32 {
@@ -530,7 +556,7 @@ mod tests {
     #[test]
     fn ppu_test() {
         let cartridge = Cartridge::from_file(TEST_FILE, false);
-        let mut cpu = Cpu::new(cartridge);
+        let mut cpu = Cpu::new(cartridge, crate::cpu::GBModel::DMG);
 
         let mut cycles: u32 = 0;
 

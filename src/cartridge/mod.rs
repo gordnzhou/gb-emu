@@ -63,6 +63,10 @@ impl Cartridge {
         self.with_bootrom
     }
 
+    pub fn cgb_compatible(&self) -> bool {
+        self.header.cgb_compatible()
+    }
+
     pub fn get_title(&self) -> String {
         self.header.title()
     }

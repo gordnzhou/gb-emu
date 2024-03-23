@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
-use super::{Cpu, Interrupt::*, Interrupt};
+use super::{Cpu, GBModel, Interrupt::{self, *}};
 
 impl Cpu {
-    /// Execute the next instruction, returning TOTAL number of M-cycles taken.
+    /// Execute the next instruction and steps through SOME parts bus (see partial_step in bus);
+    /// returns TOTAL number of M-cycles taken.
     pub(super) fn execute_next_instruction(&mut self) -> u8 {
         let opcode = self.bus_read_byte(self.PC());
 
@@ -324,9 +325,16 @@ impl Cpu {
 
     fn stop(&mut self) -> u8 {
         let _ = self.n8();
-        panic!("STOP Called");
-        // stop system and main clocks
-        // 2
+        if matches!(self.model, GBModel::CGB) {
+            if self.bus.speed_switch() {
+                self.do_speed_switch = true;
+            } else {
+                panic!("STOP called on CGB but no speed switch armed")
+            }
+        } else {
+            panic!("STOP called on DMG (no speed switch so just stops the emulator)")
+        }
+        1
     }
 
     fn ei(&mut self) -> u8 {

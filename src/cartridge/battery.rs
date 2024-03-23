@@ -4,7 +4,7 @@ use super::{mbc::RAM_BANK_SIZE, rtc::{Rtc, RTC_REGISTERS_SIZE}};
 
 pub const SAVE_PATH: &str = "saves";
 
-/// Saves and loads RAM and/or RTC state to file identified by header hash
+/// Saves and loads RAM and/or RTC state to a file; identified by cartridge header title.
 pub struct Battery {
     rom_file_location: String,
     rtc_file_location: String,

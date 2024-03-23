@@ -1,4 +1,4 @@
-use super::{Apu, Envelope, LengthCounter, Sweep, MAX_PERIOD};
+use super::{Envelope, LengthCounter, Sweep, MAX_PERIOD};
 
 
 
@@ -73,9 +73,9 @@ impl Pulse {
         self.power_on = true;
     }
 
-    pub fn make_sample(&mut self) -> f32 {
+    pub fn make_sample(&mut self) -> u8 {
         if !self.length_counter.channel_on() || !self.dac_on {
-            return 0.0;
+            return 0;
         }
 
         if self.freq_counter >= (MAX_PERIOD - self.period_value()) {
@@ -87,7 +87,7 @@ impl Pulse {
         let duty_select = (self.nrx1 as usize & 0xC0) >> 6;
         let sample = DUTY_TABLE[duty_select][self.duty_index];
 
-        Apu::to_analog(sample * self.envelope.volume())
+        sample * self.envelope.volume()
     }
 
     pub fn frame_sequencer_step(&mut self) {

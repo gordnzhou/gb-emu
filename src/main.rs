@@ -13,7 +13,7 @@ use cartridge::Cartridge;
 use cpu::Cpu;
 use emulator::Emulator;
 
-const ROM_PATH: &str = "roms/tests/dmg_sound.gb";
+const ROM_PATH: &str = "roms/tests/mooneye/emulator-only/mbc1/bits_bank2.gb";
 
 const SCREEN_SCALE: i32 = 5;
 
@@ -29,7 +29,7 @@ fn main() -> Result<(), String> {
 #[allow(dead_code)]
 fn test_blargg_rom(test_rom_path: &str) {
     let cartridge = Cartridge::from_file(test_rom_path, false);
-    let mut cpu = Cpu::new(cartridge);
+    let mut cpu = Cpu::new(cartridge, cpu::GBModel::DMG);
 
     let mut cycles: u64 = 0;
     while cycles < (1 << 32) {
