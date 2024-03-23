@@ -55,7 +55,10 @@ impl Mbc5 {
     pub fn with_battery(mut self, title: String) -> Self {
         let battery = Battery::new(title);  
         self.ram = Some(match battery.load_ram_from_file() {
-            Some(ram) => ram,
+            Some(ram) => {
+                assert!(ram.len() == self.ram_banks, "Invalid RAM Save Size!");
+                ram
+            },
             None => vec![[0; RAM_BANK_SIZE]; self.ram_banks],
         });
         self.battery = Some(battery);
@@ -67,7 +70,7 @@ impl Mbc for Mbc5 {
     fn read_rom(&self, addr: usize) -> u8 {
         match addr {
             0x0000..=0x3FFF => self.rom[0][addr],
-            0x4000..=0x7FFF => self.rom[self.current_rom_bank][addr - 0x4000],
+            0x4000..=0x7FFF => self.rom[self.current_rom_bank & (self.rom_banks - 1)][addr - 0x4000],
             _ => unreachable!()
         }
     }
@@ -77,10 +80,8 @@ impl Mbc for Mbc5 {
             0x0000..=0x1FFF => self.ram_enabled = (byte & 0xF) == 0xA,
             0x2000..=0x2FFF => self.current_rom_bank = byte as usize,
             0x3000..=0x3FFF => self.current_rom_bank |= (byte as usize & 1) << 8,
-            0x4000..=0x5FFF => {
-                if (byte as usize) < self.ram_banks {
-                    self.current_ram_bank = byte as usize;
-                }
+            0x4000..=0x5FFF => if (byte as usize) < self.ram_banks {
+                self.current_ram_bank = byte as usize;
             },
             _ => {}
         }
@@ -132,5 +133,24 @@ impl Mbc for Mbc5 {
         };
 
         battery.save_ram_to_file(ram);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_mooneye_rom;
+    use crate::cpu::GBModel::DMG;
+    
+
+    #[test]
+    fn mbc5_rom_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_1Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_2Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_4Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_8Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_16Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_32Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_64Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc5/rom_512kb.gb", DMG);
     }
 }

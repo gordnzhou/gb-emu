@@ -193,16 +193,34 @@ mod tests {
 
     #[test]
     fn cpu_instr_test() {
-        test_blargg_rom(CPU_INSTR)
+        test_blargg_rom(CPU_INSTR, super::GBModel::DMG);
     }
 
     #[test]
     fn cpu_mem_timing_test() {
-        test_blargg_rom(MEM_TIMING);
+        test_blargg_rom(MEM_TIMING, super::GBModel::DMG);
     }
 
     #[test]
     fn cpu_instr_timing_test() {
-        test_blargg_rom(INSTR_TIMING);
+        test_blargg_rom(INSTR_TIMING, super::GBModel::DMG);
     }
+}
+
+pub fn mooneye_pass_check(cpu: &Cpu) -> bool {
+    cpu.bc.hi() == 3 && 
+    cpu.bc.lo() == 5 && 
+    cpu.de.hi() == 8 && 
+    cpu.de.lo() == 13 &&
+    cpu.hl.hi() == 21 && 
+    cpu.hl.lo() == 34
+}  
+
+pub fn mooneye_fail_check(cpu: &Cpu) -> bool {
+    cpu.bc.hi() == 0x42 && 
+    cpu.bc.lo() == 0x42 && 
+    cpu.de.hi() == 0x42 && 
+    cpu.de.lo() == 0x42 &&
+    cpu.hl.hi() == 0x42 && 
+    cpu.hl.lo() == 0x42
 }

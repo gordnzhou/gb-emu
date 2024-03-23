@@ -1,4 +1,4 @@
-use std::cmp::{max, min};
+use std::cmp::min;
 
 use crate::bus::RAM_START;
 use crate::cartridge::battery::Battery;
@@ -51,7 +51,10 @@ impl Mbc1 {
     pub fn with_battery(mut self, title: String) -> Self {
         let battery = Battery::new(title);  
         self.ram = Some(match battery.load_ram_from_file() {
-            Some(ram) => ram,
+            Some(ram) => {
+                assert!(ram.len() == self.ram_banks, "Invalid RAM Save Size!");
+                ram
+            },
             None => vec![[0; RAM_BANK_SIZE]; self.ram_banks],
         });
         self.battery = Some(battery);
@@ -62,13 +65,16 @@ impl Mbc1 {
 impl Mbc for Mbc1 {
     fn read_rom(&self, addr: usize) -> u8 {
         match addr {
-            0x0000..=0x3FFF => self.rom[0][addr],
-            0x4000..=0x7FFF => {
-                let bank = match self.current_rom_bank {
-                    0x00 | 0x20 | 0x40 | 0x60 => self.current_rom_bank + 1,
-                    _ => self.current_rom_bank
+            0x0000..=0x3FFF => {
+                let rom_bank = if self.banking_mode {
+                    self.current_rom_bank & 0b1100000
+                } else {
+                    0
                 };
-                self.rom[bank][addr - 0x4000]
+                self.rom[rom_bank][addr]
+            },
+            0x4000..=0x7FFF => {
+                self.rom[self.current_rom_bank][addr - 0x4000]
             }
             _ => unreachable!()
         }
@@ -78,22 +84,22 @@ impl Mbc for Mbc1 {
         match addr {
             0x0000..=0x1FFF => self.ram_enabled = (byte & 0xF) == 0xA,
             0x2000..=0x3FFF => {
+                let byte = byte + (byte & 0b11111 == 0) as u8;
                 let mask = min(self.rom_banks as u8 - 1, 0b11111);
-                self.current_rom_bank = max((byte & mask) as usize, 1)
+                self.current_rom_bank = (byte & mask) as usize;
             },
             0x4000..=0x5FFF => {
-                if !self.banking_mode {
-                    if self.ram_banks == 4 {
-                        self.current_ram_bank = (byte & 3) as usize;
-                    }
-                } else {
-                    if self.rom_banks >= 64 {
-                        self.current_rom_bank = ((byte & 3) << 5) as usize | (self.current_rom_bank & 0x1F);
-                    }
+                if self.ram_banks > 1 {
+                    self.current_ram_bank = (byte & (self.ram_banks as u8 - 1)) as usize;
                 }
+
+                if self.rom_banks > 0b11111 {
+                    let mask = ((self.rom_banks as u8 - 1) - 0b11111) >> 5;
+                    self.current_rom_bank = ((byte & mask) << 5) as usize | (self.current_rom_bank & 0b11111);
+                } 
             },
-            0x6000..=0x7FFF => if self.ram_banks > 1 && self.rom_banks > 32 {
-                self.banking_mode = byte != 0
+            0x6000..=0x7FFF => if self.ram_banks > 1 || self.rom_banks > 32 {
+                self.banking_mode = (byte & 1) != 0
             },
             _ => unreachable!()
         }
@@ -117,8 +123,10 @@ impl Mbc for Mbc1 {
             return;
         }
 
+        let ram_bank = if self.banking_mode { self.current_ram_bank } else { 0 };
+        
         match &mut self.ram {
-            Some(ram) => ram[self.current_ram_bank][addr - RAM_START] = byte,
+            Some(ram) => ram[ram_bank][addr - RAM_START] = byte,
             None => {}
         };
     }
@@ -146,5 +154,35 @@ impl Mbc for Mbc1 {
         };
 
         battery.save_ram_to_file(ram);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_mooneye_rom;
+    use crate::cpu::GBModel::DMG;
+    
+    #[test]
+    fn mbc1_bits_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/bits_bank1.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/bits_bank2.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/bits_mode.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/bits_ramg.gb", DMG);
+    }
+
+    #[test]
+    fn mbc1_rom_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/rom_1Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/rom_2Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/rom_4Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/rom_8Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/rom_16Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/rom_512kb.gb", DMG);
+    }
+
+    #[test]
+    fn mbc1_ram_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/ram_64kb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc1/ram_256kb.gb", DMG);
     }
 }

@@ -62,7 +62,10 @@ impl Mbc3 {
         let battery = Battery::new(title);    
         if self.ram.is_some() {
             match battery.load_ram_from_file() {
-                Some(ram) => self.ram = Some(ram),
+                Some(ram) => {
+                    assert!(ram.len() == self.ram_banks, "Invalid RAM Save Size!");
+                    self.ram = Some(ram)
+                },
                 None => {}
             };
         }
@@ -82,7 +85,8 @@ impl Mbc for Mbc3 {
         match addr {
             0x0000..=0x3FFF => self.rom[0][addr],
             0x4000..=0x7FFF => {
-                let bank = max(self.current_rom_bank, 1);
+                let mask = self.rom_banks - 1;
+                let bank = max(self.current_rom_bank & mask, 1);
                 self.rom[bank][addr - 0x4000]
             }
             _ => unreachable!()

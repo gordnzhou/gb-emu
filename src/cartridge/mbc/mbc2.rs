@@ -54,11 +54,7 @@ impl Mbc for Mbc2 {
         match addr {
             0x0000..=0x3FFF => self.rom[0][addr],
             0x4000..=0x7FFF => {
-                let bank = match self.current_rom_bank {
-                    0x00 | 0x20 | 0x40 | 0x60 => self.current_rom_bank + 1,
-                    _ => self.current_rom_bank
-                };
-                self.rom[bank][addr - 0x4000]
+                self.rom[self.current_rom_bank][addr - 0x4000]
             }
             _ => unreachable!()
         }
@@ -67,10 +63,12 @@ impl Mbc for Mbc2 {
     fn write_rom(&mut self, addr: usize, byte: u8) {
         match addr {
             0x0000..=0x3FFF => {
-                if (addr & 0x100) == 0 {
-                    self.ram_enabled = (byte & 0xF) == 0xA
+                if addr & 0x100 == 0 {
+                    self.ram_enabled = (byte & 0xF) == 0xA;
                 } else {
-                    self.current_rom_bank = byte as usize & 0xF;
+                    let byte = byte + (byte & 0b1111 == 0) as u8;
+                    let mask = self.rom_banks - 1;
+                    self.current_rom_bank = byte as usize & mask;
                 }
             },
             _ => {}
@@ -81,7 +79,7 @@ impl Mbc for Mbc2 {
         if !self.ram_enabled {
             return 0xFF;
         }
-        self.ram[(addr - RAM_START) & 0b111111111] & 0xF
+        0xF0 | self.ram[(addr - RAM_START) & 0b111111111] & 0xF
     }
 
     fn write_ram(&mut self, addr: usize, byte: u8) {
@@ -110,5 +108,30 @@ impl Mbc for Mbc2 {
             ram[0][i] = self.ram[i] & 0xF
         }
         battery.save_ram_to_file(&ram);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_mooneye_rom;
+    use crate::cpu::GBModel::DMG;
+    
+    #[test]
+    fn mbc2_bits_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/bits_romb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/bits_ramg.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/bits_unused.gb", DMG);
+    }
+
+    #[test]
+    fn mbc2_rom_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/rom_1Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/rom_2Mb.gb", DMG);
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/rom_512kb.gb", DMG);
+    }
+
+    #[test]
+    fn mbc2_ram_test() {
+        test_mooneye_rom("roms/tests/mooneye/emulator-only/mbc2/ram.gb", DMG);
     }
 }
