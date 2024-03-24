@@ -24,7 +24,10 @@ pub const KEYMAPPINGS: [Keycode; 8] = [
 
 pub const LCD_WIDTH: usize= 160;
 pub const LCD_HEIGHT: usize = 144;
+
+const PIXEL_FORMAT: PixelFormatEnum = PixelFormatEnum::ARGB8888;
 pub const BYTES_PER_PIXEL: usize = 4;
+
 pub const LCD_BYTE_WIDTH: usize = BYTES_PER_PIXEL * LCD_WIDTH;
 
 // DETERMINES GAME SPEED
@@ -99,7 +102,7 @@ impl Emulator {
 
         let creator = self.canvas.texture_creator();
         let mut texture = creator
-            .create_texture_streaming(PixelFormatEnum::ARGB8888, LCD_WIDTH as u32, LCD_HEIGHT as u32)
+            .create_texture_streaming(PIXEL_FORMAT, LCD_WIDTH as u32, LCD_HEIGHT as u32)
             .map_err(|e| e.to_string())
             .unwrap();
 

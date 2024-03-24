@@ -9,11 +9,19 @@ use std::io::{self, Read};
 use self::header::Header;
 use self::mbc::Mbc;
 
-const BOOTROM_PATH: &str = "roms/bootrom.gb";
+const DMG_BOOTROM_PATH: &str = "roms/bootrom.gb";
+const CGB_BOOTROM_PATH: &str = "roms/bootrom.gbc";
+
 const BOOTROM_SIZE: usize = 0x100;
+
+// Represents the 2nd part of the CGB bootrom (right after the header)
+const BOOTROM_2_START: usize = 0x200;
+const BOOTROM_2_END: usize = 0x900;
 
 pub struct Cartridge {
     bootrom: [u8; BOOTROM_SIZE],
+    bootrom2: [u8; BOOTROM_2_END - BOOTROM_2_START],
+    cgb_bootrom: bool,
     bank: u8,
     header: Header,
     with_bootrom: bool,
@@ -23,23 +31,6 @@ pub struct Cartridge {
 impl Cartridge {
     /// Loads cartridge from the given file path (and optionally runs it with boot ROM).
     pub fn from_file(rom_path: &str, with_bootrom: bool) -> Self {
-        let mut bootrom = [0; BOOTROM_SIZE];
-        let mut bank = 1;
-        
-        if with_bootrom {
-            bank = 0;
-            match Cartridge::read_from_file(BOOTROM_PATH) {
-                Ok(rom_data) => {
-                    for i in 0..rom_data.len() {
-                        bootrom[i] = rom_data[i];
-                    }
-                }
-                Err(err) => {
-                    eprintln!("Error reading bootrom file from {}: {}", BOOTROM_PATH, err);
-                }
-            }
-        }
-
         let header = match Header::from_file(rom_path) {
             Ok(header) => header,
             Err(err) => {
@@ -47,11 +38,53 @@ impl Cartridge {
             }
         };
 
+        let mut bootrom = [0; BOOTROM_SIZE];
+        let mut bootrom2 = [0; BOOTROM_2_END - BOOTROM_2_START];
+        let mut bank = 1;
+        let mut cgb_bootrom = false;
+        
+        if with_bootrom {
+            bank = 0;
+
+            if header.cgb_compatible() {
+                cgb_bootrom = true;
+                match Cartridge::read_from_file(CGB_BOOTROM_PATH) {
+                    Ok(rom_data) => {
+                        assert!(rom_data.len() == BOOTROM_SIZE + 0x100 + BOOTROM_2_END - BOOTROM_2_START);
+                        for i in 0..BOOTROM_SIZE {
+                            bootrom[i] = rom_data[i];
+                        }
+
+                        for i in BOOTROM_2_START..BOOTROM_2_END {
+                            bootrom2[i - BOOTROM_2_START] = rom_data[i];
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading bootrom file from {}: {}", CGB_BOOTROM_PATH, err);
+                    }
+                }
+            } else {
+                match Cartridge::read_from_file(DMG_BOOTROM_PATH) {
+                    Ok(rom_data) => {
+                        assert!(rom_data.len() == BOOTROM_SIZE);
+                        for i in 0..BOOTROM_SIZE {
+                            bootrom[i] = rom_data[i];
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading bootrom file from {}: {}", DMG_BOOTROM_PATH, err);
+                    }
+                }
+            }
+        }
+
         let mbc = mbc::make_mbc(rom_path, &header);
         println!("Detected MBC: {}", mbc.display());
 
         Cartridge { 
             bootrom,
+            bootrom2,
+            cgb_bootrom,
             bank,
             header,
             with_bootrom,
@@ -80,7 +113,7 @@ impl Cartridge {
         self.bank
     }
 
-    pub fn read_from_file(file_path: &str) -> io::Result<Vec<u8>> {
+    fn read_from_file(file_path: &str) -> io::Result<Vec<u8>> {
         let mut file = File::open(file_path)?;
 
         let mut rom_data = Vec::new();
@@ -90,10 +123,16 @@ impl Cartridge {
     }
     
     pub fn read_rom(&self, addr: usize) -> u8 {
-        if addr < BOOTROM_SIZE && self.bank == 0 {
-            self.bootrom[addr]
-        } else {
+        if self.bank != 0 {
             self.mbc.read_rom(addr)
+        } else {
+            if addr < BOOTROM_SIZE {
+                self.bootrom[addr]
+            } else if self.cgb_bootrom && (BOOTROM_2_START..BOOTROM_2_END).contains(&addr) {
+                self.bootrom2[addr - BOOTROM_2_START]
+            } else {
+                self.mbc.read_rom(addr)
+            }
         }
     }
 

@@ -52,47 +52,42 @@ impl Cpu {
             "This cartridge is not compatible with CGB functions!");
 
         if cartridge.has_bootrom() {
-            Cpu { 
-                bus: Bus::new(cartridge, model),
-                model,
-                scheduled_ei: false,
-                ime: false,
-                halted: false,
-                halt_bug: false,
-                halt_triggered: false,
-                cycles_so_far: 0,
-                af: Register(0),
-                bc: Register(0),
-                de: Register(0),
-                hl: Register(0),
-                pc: Register(0),
-                sp: Register(0),
-                double_speed: false,
-                do_speed_switch: false,
-            }
+            let bus = Bus::new(cartridge, model);
+            Cpu::make_cpu(0, 0, 00, 0, 0, 0, model, bus)
         } else {
             let mut bus = Bus::new(cartridge, model);
             bus.ppu.write_io(0xFF40, 0x91);
             bus.ppu.write_io(0xFF41, 0x81);
 
-            Cpu { 
-                bus,
-                model,
-                scheduled_ei: false,
-                ime: false,
-                halted: false,
-                halt_bug: false,
-                halt_triggered: false,
-                cycles_so_far: 0,
-                af: Register(0x01B0),
-                bc: Register(0x0013),
-                de: Register(0x00D8),
-                hl: Register(0x014D),
-                pc: Register(0x0100),
-                sp: Register(0xFFFE),
-                double_speed: false,
-                do_speed_switch: false
+            match model {
+                GBModel::DMG => {
+                    Cpu::make_cpu(0x01B0, 0x0013, 0x00D8, 0x014D, 0x0100, 0xFFFE, model, bus)
+                }
+                GBModel::CGB => {
+                    Cpu::make_cpu(0x1180, 0x0000, 0xFF56, 0x000D, 0x0100, 0xFFFE, model, bus)
+                }
             }
+        }
+    }
+
+    fn make_cpu(af: u16, bc: u16, de: u16, hl: u16, pc: u16, sp: u16, model: GBModel, bus: Bus) -> Self {
+        Cpu { 
+            bus,
+            model,
+            scheduled_ei: false,
+            ime: false,
+            halted: false,
+            halt_bug: false,
+            halt_triggered: false,
+            cycles_so_far: 0,
+            af: Register(af),
+            bc: Register(bc),
+            de: Register(de),
+            hl: Register(hl),
+            pc: Register(pc),
+            sp: Register(sp),
+            double_speed: false,
+            do_speed_switch: false,
         }
     }
 

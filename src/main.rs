@@ -13,7 +13,7 @@ use cartridge::Cartridge;
 use cpu::{mooneye_fail_check, mooneye_pass_check, Cpu, GBModel};
 use emulator::Emulator;
 
-const ROM_PATH: &str = "roms/tests/mooneye/emulator-only/mbc1/bits_bank2.gb";
+const ROM_PATH: &str = "roms/pokemongold.gbc";
 
 const SCREEN_SCALE: i32 = 5;
 

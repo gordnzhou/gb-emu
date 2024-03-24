@@ -7,7 +7,7 @@ use crate::timer::Timer;
 use crate::cartridge::Cartridge;
 use crate::cpu::{GBModel, Interrupt};
 
-const WRAM_SIZE: usize = 0x2000;
+const WRAM_SIZE: usize = 0x1000;
 const HRAM_SIZE: usize = 0x0080;
 
 pub const ROM_START: usize = 0x0000;
@@ -38,7 +38,7 @@ pub struct Bus {
     pub joypad: Joypad,
     pub apu: Apu,
     pub ppu: Ppu,
-    wram: [u8; WRAM_SIZE],
+    wram: [[u8; WRAM_SIZE]; 8],
     timer: Timer, 
     hram: [u8; HRAM_SIZE],
     interrupt_enable: u8,
@@ -48,13 +48,15 @@ pub struct Bus {
 
     // CGB ONLY
     key1: u8,
-    hdma1: u8,
-    hdma2: u8,
-    hdma3: u8,
-    hdma4: u8,
+    hdma1: usize,
+    hdma2: usize,
+    hdma3: usize,
+    hdma4: usize,
     hdma5: u8,
     rp: u8,
     svbk: u8,
+    hdma_bytes: usize,
+    hdma_running: bool,
 }
 
 impl Bus {
@@ -69,7 +71,7 @@ impl Bus {
             apu: Apu::new(None, model),
             ppu: Ppu::new(model),
             timer: Timer::new(),
-            wram: [0; WRAM_SIZE],
+            wram: [[0; WRAM_SIZE]; 8],
             hram: [0; HRAM_SIZE],
             interrupt_enable: 0,
             interrupt_flag: 0xE0,
@@ -81,9 +83,11 @@ impl Bus {
             hdma2: 0,
             hdma3: 0,
             hdma4: 0,
-            hdma5: 0,
+            hdma5: 0xFF,
             rp: 0,
             svbk: 0,
+            hdma_bytes: 0,
+            hdma_running: false,
         }
     }
 
@@ -96,9 +100,9 @@ impl Bus {
     /// this should also be called AFTER and BETWEEN (right after reads/writes) instructions.
     /// NOTE: This stepping is affected by double speed mode on CGB
     pub fn partial_step(&mut self, cycles: u8) {
-        // step HDMA
-
         self.step_oam_dma(cycles);
+
+        self.step_vram_hdma();
 
         let old_div = self.timer.div;
         if self.timer.step(cycles) {
@@ -142,8 +146,8 @@ impl Bus {
             ROM_START..=ROM_END     => self.cartridge.read_rom(addr),
             VRAM_START..=VRAM_END   => self.ppu.read_vram(addr),
             RAM_START..=RAM_END     => self.cartridge.read_ram(addr),
-            WRAM_START..=WRAM_END   => self.wram[addr - WRAM_START],
-            WRAM2_START..=WRAM2_END => self.wram[addr - WRAM2_START],
+            WRAM_START..=WRAM_END   => self.read_wram(addr),
+            WRAM2_START..=WRAM2_END => self.read_wram(addr - 2*WRAM_SIZE),
             OAM_START..=OAM_END     => self.ppu.read_oam(addr),
             EMPTY_START..=EMPTY_END => 0xFF,
 
@@ -159,7 +163,7 @@ impl Bus {
             // CGB Registers
             0xFF4D if self.is_cgb() => self.key1, 
             0xFF4F if self.is_cgb() => self.ppu.read_io(addr),
-            0xFF55 if self.is_cgb() => self.hdma5,
+            0xFF55 if self.is_cgb() => self.read_hdma5(),
             0xFF56 if self.is_cgb() => self.rp,
             0xFF68..=0xFF6C if self.is_cgb() => self.ppu.read_io(addr),
             0xFF70 if self.is_cgb() => self.svbk,
@@ -180,8 +184,8 @@ impl Bus {
             ROM_START..=ROM_END     => self.cartridge.write_rom(addr, byte),
             VRAM_START..=VRAM_END   => self.ppu.write_vram(addr, byte),
             RAM_START..=RAM_END     => self.cartridge.write_ram(addr, byte),
-            WRAM_START..=WRAM_END   => self.wram[addr - WRAM_START] = byte,
-            WRAM2_START..=WRAM2_END => self.wram[addr - WRAM2_START] = byte,
+            WRAM_START..=WRAM_END   => self.write_wram(addr, byte),
+            WRAM2_START..=WRAM2_END => self.write_wram(addr - 2*WRAM_SIZE, byte),
             OAM_START..=OAM_END     => self.ppu.write_oam(addr, byte),
             EMPTY_START..=EMPTY_END => {},
 
@@ -199,11 +203,11 @@ impl Bus {
             // CGB Registers
             0xFF4D if self.is_cgb() => self.key1 = byte & 0x7F,
             0xFF4F if self.is_cgb() => self.ppu.write_io(addr, byte),
-            0xFF51 if self.is_cgb() => self.hdma1 = byte,
-            0xFF52 if self.is_cgb() => self.hdma2 = byte,
-            0xFF53 if self.is_cgb() => self.hdma3 = byte,
-            0xFF54 if self.is_cgb() => self.hdma4 = byte,
-            0xFF55 if self.is_cgb() => self.hdma5 = byte,
+            0xFF51 if self.is_cgb() => self.hdma1 = byte as usize,
+            0xFF52 if self.is_cgb() => self.hdma2 = byte as usize,
+            0xFF53 if self.is_cgb() => self.hdma3 = byte as usize,
+            0xFF54 if self.is_cgb() => self.hdma4 = byte as usize,
+            0xFF55 if self.is_cgb() => self.write_hdma5(byte),
             0xFF56 if self.is_cgb() => self.rp = byte & 0xFD,
             0xFF68..=0xFF6C if self.is_cgb() => self.ppu.write_io(addr, byte),
             0xFF70 if self.is_cgb() => self.svbk = byte,
@@ -214,12 +218,61 @@ impl Bus {
         }
     }
 
+    fn read_wram(&self, addr: usize) -> u8 {
+        if addr < WRAM_START + WRAM_SIZE {
+            return self.wram[0][addr - WRAM_START];
+        }
+
+        if self.is_cgb() {
+            let wram_bank = ((self.svbk as usize) & 0x7) + (self.svbk == 0) as usize;
+            self.wram[wram_bank][addr - WRAM_START - WRAM_SIZE]
+        } else {
+            self.wram[1][addr - WRAM_START - WRAM_SIZE]
+        }
+    }
+
+    fn write_wram(&mut self, addr: usize, byte: u8) {
+        if addr < WRAM_START + WRAM_SIZE {
+            self.wram[0][addr - WRAM_START] = byte;
+            return;
+        }
+
+        if self.is_cgb() {
+            let wram_bank = ((self.svbk as usize) & 0x7) + (self.svbk == 0) as usize;
+            self.wram[wram_bank][addr - WRAM_START - WRAM_SIZE] = byte;
+        } else {
+            self.wram[1][addr - WRAM_START - WRAM_SIZE] = byte;
+        }
+    }
+
     /// Writes to DMA register and initializes an OAM DMA transfer.
     fn write_dma(&mut self, byte: u8) {
         self.ppu.write_dma(byte);
         self.dma_start = (byte as u16) << 8;
         self.dma_ticks = 0;
         self.step_oam_dma(1);
+    }
+
+    /// Writes to HDMA5 register and initializes HDMA transfer
+    fn write_hdma5(&mut self, byte: u8) {
+        self.hdma5 = byte;
+               
+        if byte & 0x80 == 0 {
+            let transfer_length = self.transfer_length();
+            let source_start = self.hdma_source_start();
+            let dest_start = self.hdma_dest_start();
+
+            for i in 0..transfer_length {
+                let byte = self.read_byte((source_start + i) as u16);
+                self.ppu.write_vram(dest_start + i, byte)
+            }
+
+            self.hdma_running = false;
+        } else {
+            self.hdma_running = true;
+            self.hdma_bytes = 0;
+            self.step_vram_hdma();
+        }
     }
 
     /// Steps through a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
@@ -236,6 +289,47 @@ impl Bus {
             cycles -=1;
             self.dma_ticks += 1;
         }
+    }
+
+    /// If HBLank DMA is running, transfers 0x10 bytes to VRAM at each HBlank.
+    fn step_vram_hdma(&mut self) {
+        if !self.ppu.entered_hblank() || !self.hdma_running {
+            return;
+        }
+
+        let transfer_length = self.transfer_length();
+        let source_start = self.hdma_source_start();
+        let dest_start = self.hdma_dest_start();
+
+        for i in  0..0x10 {
+            let byte = self.read_byte((source_start + self.hdma_bytes + i) as u16);
+            self.ppu.write_vram(dest_start + self.hdma_bytes + i, byte);
+        }
+
+        self.hdma_bytes += 0x10;
+        if self.hdma_bytes >= transfer_length {
+            self.hdma_running = false;
+        }
+    }
+
+    fn read_hdma5(&self) -> u8 {
+        if !self.hdma_running {
+            0xFF
+        } else {
+            ((self.transfer_length() - 1 - self.hdma_bytes) / 0x10) as u8
+        }
+    }
+
+    fn transfer_length(&self) -> usize {
+       ((self.hdma5 as usize & 0x7F) + 1) * 0x10
+    }
+
+    fn hdma_source_start(&self) -> usize {
+        (((self.hdma1 as usize) << 8)| self.hdma2 as usize) & 0xFFF0
+    }
+
+    fn hdma_dest_start(&self) -> usize {
+        0x8000 | (((self.hdma3 as usize) << 8)| self.hdma4 as usize) & 0x1FF0
     }
 
     /// Sets given interrupt's bit in IF, which requests for that interrupt.

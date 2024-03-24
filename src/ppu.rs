@@ -10,6 +10,9 @@ const OAM_ENTRIES: usize = 40;
 
 const TILE_MAP_SIZE: usize = 0x0400;
 
+// 8 palettes * 4 colours/palette * 2 bytes/colour 
+const CRAM_SIZE: usize = 64;
+
 const LCD_WIDTH: usize= 160;
 const LCD_HEIGHT: usize = 144;
 
@@ -18,7 +21,7 @@ const MODE_1_DOTS: u32 = SCAN_LINE_DOTS * 10;
 const MODE_2_DOTS: u32 = 80;
 const MODE_3_MIN_DOTS: u32 = 172;
 
-pub const COLORS: [[u8; 4]; 4] = [
+pub const COLOURS: [[u8; BYTES_PER_PIXEL]; 4] = [
     [0x0F, 0xBC, 0x9B, 0xFF], // #9BBC0F => white
     [0x0F, 0xAC, 0x8B, 0xFF], // #8BAC0F => light grey
     [0x30, 0x62, 0x30, 0xFF], // #306230 => dark grey
@@ -35,7 +38,7 @@ enum Mode {
 
 pub struct Ppu {
     model: GBModel,
-    tile_data: [[u8; TILE_SIZE]; TILE_ENTRIES],
+    tile_data0: [[u8; TILE_SIZE]; TILE_ENTRIES],
     tile_map0: [u8; TILE_MAP_SIZE],
     tile_map1: [u8; TILE_MAP_SIZE],
     oam: [[u8; OAM_ENTRY_SIZE]; OAM_ENTRIES],
@@ -52,11 +55,11 @@ pub struct Ppu {
     wy: u8,
     wx: u8,
 
-    // frame buffer representing the LCD screen that will be
-    // displayed on canvas at 60 Hz 
-    pub frame_buffer: [u8; LCD_WIDTH * LCD_HEIGHT * 4],
+    // frame buffer representing the LCD screen
+    pub frame_buffer: [u8; LCD_BYTE_WIDTH * LCD_HEIGHT],
     pub stat_triggered: bool,
     pub entered_vblank: bool,
+
     stat_line: bool,
     mode: Mode,
     mode_elapsed_dots: u32,
@@ -67,23 +70,29 @@ pub struct Ppu {
     line_has_window: bool,
     win_counter: usize,
     obj_buffer_index: usize,
-    obj_buffer: Vec<usize>,
+    obj_buffer: Vec<OAMEntry>,
     last_vblank_scanline: u32,
 
     // CGB_ONLY
     vbk: u8,
     bgpi: u8,
-    bgpd: u8,
     obpi: u8,
-    obpd: u8,
     opri: u8,
+    tile_data1: [[u8; TILE_SIZE]; TILE_ENTRIES],
+    attr_map0: [u8; TILE_MAP_SIZE],
+    attr_map1: [u8; TILE_MAP_SIZE],
+    cram_bg: [u8; CRAM_SIZE],
+    cram_obj: [u8; CRAM_SIZE],
+
+    // for HBlank DMA transfer (CGB only)
+    entered_hblank: bool,
 }
 
 impl Ppu {
     pub fn new(model: GBModel) -> Self {
         Ppu { 
             model,
-            tile_data: [[0; TILE_SIZE]; TILE_ENTRIES],
+            tile_data0: [[0; TILE_SIZE]; TILE_ENTRIES],
             tile_map0: [0; TILE_MAP_SIZE],
             tile_map1: [0; TILE_MAP_SIZE],
             oam: [[0; OAM_ENTRY_SIZE]; OAM_ENTRIES],
@@ -117,10 +126,14 @@ impl Ppu {
 
             vbk: 0,
             bgpi: 0,
-            bgpd: 0,
             obpi: 0,
-            obpd: 0,
             opri: 0,
+            tile_data1: [[0; TILE_SIZE]; TILE_ENTRIES],
+            attr_map0: [0; TILE_MAP_SIZE],
+            attr_map1: [0; TILE_MAP_SIZE],
+            cram_bg: [0; CRAM_SIZE],
+            cram_obj: [0; CRAM_SIZE],
+            entered_hblank: false,
         }
     }
 
@@ -180,11 +193,16 @@ impl Ppu {
             Mode::OamScan2 => {
                 self.wx_cond = false;
                 self.obj_buffer_index = 0;
-                self.obj_buffer.sort_by(|a, b| { self.oam[*a][1].cmp(&self.oam[*b][1])});
+                if !self.is_cgb() || self.opri != 0 {
+                    self.obj_buffer.sort_by(|a, b| { a.x.cmp(&b.x)});
+                }
                 self.mode_3_dots = self.calc_mode_3_dots();
                 Mode::Drawing3
             },
-            Mode::Drawing3 => Mode::HBlank0,
+            Mode::Drawing3 => {
+                self.entered_hblank = true;
+                Mode::HBlank0
+            },
         };
     }
 
@@ -209,7 +227,7 @@ impl Ppu {
                 while fetches > 0 && self.obj_buffer_index < OAM_ENTRIES && self.obj_buffer.len() < 10 {
                     let obj_y = self.oam[self.obj_buffer_index][0];   
                     if self.ly + 16 >= obj_y && self.ly + 16 < obj_y + self.obj_size()  {
-                        self.obj_buffer.push(self.obj_buffer_index);
+                        self.obj_buffer.push(OAMEntry::new(self.oam[self.obj_buffer_index]));
                     }
                     self.obj_buffer_index += 1;
                     fetches -= 1;
@@ -219,20 +237,21 @@ impl Ppu {
                 let mut pixels_left = dots;
                 while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
                     self.wy_cond |= self.wy == self.ly;
-                    self.wx_cond = if self.wx < 7 {
-                        self.wx as usize <= self.cur_pixel_x + 7
-                    } else {
-                        self.wx as usize <= self.cur_pixel_x + 7
-                    };
+                    self.wx_cond = self.wx as usize <= self.cur_pixel_x + 7;
 
                     // future TODO (maybe): implement BG and OAM FIFO 
-                    let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize) as usize; 
-                    for i in 0..=3 {
-                        self.frame_buffer[usize::from(self.ly as usize) * LCD_BYTE_WIDTH
+                    let colour = self.render_pixel(self.cur_pixel_x, self.ly as usize); 
+                    let display_colour = match self.model {
+                        GBModel::DMG => COLOURS[colour as usize],
+                        GBModel::CGB => Ppu::rgb555_to_argb8888(colour),
+                    };
+
+                    for i in 0..BYTES_PER_PIXEL {
+                        self.frame_buffer[usize::from(self.ly) * LCD_BYTE_WIDTH
                             + usize::from(self.cur_pixel_x) * BYTES_PER_PIXEL
-                            + i] = COLORS[colour][i];
+                            + i] = display_colour[i];
                     }
-                    
+        
                     self.cur_pixel_x += 1;
                     pixels_left -= 1;
                 }
@@ -243,72 +262,84 @@ impl Ppu {
         self.update_stat();
     }
 
-    fn render_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> u8 {
-        let mut colour = self.render_bgwin_pixel(lcd_x, lcd_y);
-        colour = self.render_obj_pixel(colour, lcd_x, lcd_y);
+    fn render_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> u16 {
+        let (mut colour, bg_priority, bg_is_0) = self.render_bgwin_pixel(lcd_x, lcd_y);
+        colour = self.render_obj_pixel(colour, lcd_x, lcd_y, bg_priority, bg_is_0);
         colour
     }
 
-    fn render_bgwin_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> u8 {
-        if self.obj_only() {
-            return 0;
+    fn render_bgwin_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> (u16, bool, bool) {
+        let mut is_bg = true;
+        let mut x = (lcd_x + self.scx as usize) % 0xFF;
+        let mut y = (lcd_y as usize + self.scy as usize) % 0xFF;
+
+        if self.win_enabled() && self.wx_cond && self.wy_cond {
+            self.line_has_window = true;
+            is_bg = false;
+            x = lcd_x + 7 - self.wx as usize;
+            y = self.win_counter;       
         }
 
-        let tile_data =  if self.win_enabled() && self.wx_cond && self.wy_cond {
-            self.line_has_window = true;
-            // assert!(lcd_x + 7 >= self.wx as usize, "{} {}", lcd_x, self.wx);
-            let x = lcd_x + 7 - self.wx as usize;
-            let y = self.win_counter;
-            self.fetch_bgwin_tile(x, y, false)
-        } else {
-            let x = (lcd_x + self.scx as usize) % 0xFF;
-            let y = (lcd_y as usize + self.scy as usize) % 0xFF;
-            self.fetch_bgwin_tile(x, y, true)
-        };
+        let tmap_addr = (x >> 3) + ((y >> 3) << 5);
+        let tile_id = self.fetch_bgwin_tile_id(tmap_addr, is_bg);
 
-        Ppu::apply_palette(&tile_data, &self.bgp)
+        match self.model {
+            GBModel::DMG => {
+                if self.lcdc & 0x01 == 0 {
+                    return (0, false, false);
+                }
+
+                let colour_id = self.fetch_tile_pixel(self.lcdc & 0x10 == 0, tile_id, x, y, false, false, false);
+                (Ppu::apply_palette_dmg(&colour_id, &self.bgp), false, false)
+            }
+            GBModel::CGB => {
+                let attributes = self.fetch_bgwin_attribute(tmap_addr, is_bg);
+                let palette = attributes & 0x07;
+                let bank = attributes & 0x08 != 0;
+                let x_flip = attributes & 0x20 != 0;
+                let y_flip = attributes & 0x40 != 0;
+                let priority = attributes & 0x80 != 0;
+
+                let colour_id = self.fetch_tile_pixel(self.lcdc & 0x10 == 0, tile_id, x, y, x_flip, y_flip, bank);
+                (Ppu::apply_palette_cgb(&colour_id, self.cram_bg, &palette), priority, colour_id == 0)
+            }
+        }
+
     }
 
-    fn render_obj_pixel(&self, bg_colour: u8, lcd_x: usize, lcd_y: usize) -> u8 {
+    fn render_obj_pixel(&self, bg_colour: u16, lcd_x: usize, lcd_y: usize, bg_priority: bool, bg_is_0: bool) -> u16 {
         let mut colour = bg_colour;
 
-        for index in &self.obj_buffer {
+        for obj in &self.obj_buffer {
             if !self.obj_enabled() {
                 break;
             }
 
-            let obj_y = self.oam[*index][0] as usize; // actual screen y pos = obj_y - 16
-            let obj_x = self.oam[*index][1] as usize; // actual screen x pos = obj_x - 8
-            let tile_id = self.oam[*index][2] as usize;
-            let attributes = self.oam[*index][3];
-            let x_flip = attributes & 0x20 != 0;
-            let y_flip = attributes & 0x40 != 0;
-
-            if !(obj_x <= lcd_x + 8 && lcd_x < obj_x) {
+            if !(obj.x <= lcd_x + 8 && lcd_x < obj.x) {
                 continue;
             }
 
-            let tile_id = if self.obj_size() == 16 {
-                if (lcd_y as usize + 8 >= obj_y) ^ y_flip {
-                    tile_id | 0x01
-                } else {
-                    tile_id & 0xFE
-                }
-            } else {
-                tile_id
-            };
-
-            let tile_x = lcd_x + 8 - obj_x;
-            let tile_y = lcd_y as usize + 16 - obj_y;
-            let id = self.fetch_tile_pixel(false, tile_id as u8, tile_x, tile_y, x_flip, y_flip);
+            let tile_id = obj.fetch_tile_id(lcd_y, self.obj_size());
+            let tile_x = lcd_x + 8 - obj.x;
+            let tile_y = lcd_y as usize + 16 - obj.y;
+            let use_bank_1 = obj.cgb_use_bank_1 && matches!(self.model, GBModel::CGB);
+            let id = self.fetch_tile_pixel(false, tile_id as u8, tile_x, tile_y, 
+                obj.x_flip, obj.y_flip, use_bank_1);
 
             if id != 0 { 
-                let palette = if attributes & 0x10 == 0 { self.obp0 } else { self.obp1 };
-
-                if attributes & 0x80 == 0 || colour == 0 {
-                    colour = Ppu::apply_palette(&id, &palette);
+                match self.model {
+                    GBModel::DMG => {
+                        if colour == 0 || obj.has_priority {
+                            let palette = if !obj.dmg_palette { self.obp0 } else { self.obp1 };
+                            colour = Ppu::apply_palette_dmg(&id, &palette);
+                        }
+                    }
+                    GBModel::CGB => {
+                        if bg_is_0 || self.lcdc & 0x01 == 0 || (obj.has_priority && !bg_priority) {
+                            colour = Ppu::apply_palette_cgb(&id, self.cram_obj, &obj.cgb_palette)
+                        }
+                    }
                 }
-
                 break;
             }
         }
@@ -318,8 +349,13 @@ impl Ppu {
 
     /// Returns colour id from tile_id's tile at (tile_x, tile_y).
     /// Set addr_mode to false for 0x8000 tile_data addressing, true for 0x8800 addressing.
-    fn fetch_tile_pixel(&self, addr_mode: bool, tile_id: u8, tile_x: usize, tile_y: usize, x_flip: bool, y_flip: bool) -> u8 {
-        let tile = self.tile_data[if !addr_mode { 
+    fn fetch_tile_pixel(&self, addr_mode: bool, tile_id: u8, tile_x: usize, tile_y: usize, x_flip: bool, y_flip: bool, bank: bool) -> u8 {
+        let mut tile_data = &self.tile_data0;
+        if bank && matches!(self.model, GBModel::CGB) {
+            tile_data = &self.tile_data1;
+        }
+        
+        let tile = tile_data[if !addr_mode { 
             tile_id as usize
         } else {
             (256 + (tile_id as i8) as i16) as usize
@@ -334,17 +370,22 @@ impl Ppu {
         (pixel_hi << 1) | pixel_lo
     }
 
-    /// Returns colour id of pixel at (x, y) from bg/window tile map.
-    fn fetch_bgwin_tile(&self, x: usize, y: usize, is_bg: bool) -> u8 {
-        let tmap_addr = (x >> 3) + ((y >> 3) << 5);
+    fn fetch_bgwin_tile_id(&self, tmap_addr: usize, is_bg: bool) -> u8 {     
         let lcd_bit = if is_bg { 0x08 } else { 0x40 };
-        let tile_id = if self.lcdc & lcd_bit == 0 { 
+        if self.lcdc & lcd_bit == 0 { 
             self.tile_map0[tmap_addr] 
         } else { 
             self.tile_map1[tmap_addr] 
-        };
+        }
+    }
 
-        self.fetch_tile_pixel(self.lcdc & 0x10 == 0, tile_id, x, y, false, false)
+    fn fetch_bgwin_attribute(&self, tmap_addr: usize, is_bg: bool) -> u8 {     
+        let lcd_bit = if is_bg { 0x08 } else { 0x40 };
+        if self.lcdc & lcd_bit == 0 { 
+            self.attr_map0[tmap_addr] 
+        } else { 
+            self.attr_map1[tmap_addr] 
+        }
     }
 
     /// updates STAT register and updates stat line
@@ -373,7 +414,7 @@ impl Ppu {
     }
 
     fn win_enabled(&self) -> bool {
-        if self.lcdc & 0x01 == 0 {
+        if matches!(self.model, GBModel::DMG) && self.lcdc & 0x01 == 0 {
             false
         } else {
             self.lcdc & 0x20 != 0
@@ -382,11 +423,6 @@ impl Ppu {
 
     fn obj_enabled(&self) -> bool {
         self.lcdc & 0x02 != 0
-    }
-
-    /// Returns true if bg and window will become blank and only objects are displayed on LCD
-    fn obj_only(&self) -> bool {
-        self.lcdc & 0x01 == 0
     }
 
     fn obj_size(&self) -> u8 {
@@ -399,26 +435,47 @@ impl Ppu {
 
     pub fn read_vram(&self, addr: usize) -> u8 {
         // Let cpu read from vram EVEN DURING MODE 3
+        let mut tile_data = &self.tile_data0;
+        let mut map0= &self.tile_map0;
+        let mut map1 = &self.tile_map1;
+
+        if self.vbk > 0 && matches!(self.model, GBModel::CGB) {
+            tile_data = &self.tile_data1;
+            map0 = &self.attr_map0;
+            map1 = &self.attr_map1;
+        }
+
         match addr {
             0x8000..=0x97FF => {
                 let index = addr - 0x8000;
-                self.tile_data[index / TILE_SIZE][index % TILE_SIZE]
+                tile_data[index / TILE_SIZE][index % TILE_SIZE]
             },
-            0x9800..=0x9BFF => self.tile_map0[addr - 0x9800],
-            0x9C00..=0x9FFF => self.tile_map1[addr - 0x9C00],
+            0x9800..=0x9BFF => map0[addr - 0x9800],
+            0x9C00..=0x9FFF => map1[addr - 0x9C00],
             _ => unreachable!(),
         }
     }
 
     pub fn write_vram(&mut self, addr: usize, byte: u8) {
+        // Let cpu write from vram EVEN DURING MODE 3
+        let mut tile_data = &mut self.tile_data0;
+        let mut map0= &mut self.tile_map0;
+        let mut map1 = &mut self.tile_map1;
+
+        if self.vbk > 0 && matches!(self.model, GBModel::CGB) {
+            tile_data = &mut self.tile_data1;
+            map0 = &mut self.attr_map0;
+            map1 = &mut self.attr_map1;
+        }
+
         // Let cpu write to vram EVEN DURING MODE 3
         match addr {
             0x8000..=0x97FF => {
                 let index = addr - 0x8000;
-                self.tile_data[index / TILE_SIZE][index % TILE_SIZE] = byte;
+                tile_data[index / TILE_SIZE][index % TILE_SIZE] = byte;
             }
-            0x9800..=0x9BFF => self.tile_map0[addr - 0x9800] = byte,
-            0x9C00..=0x9FFF => self.tile_map1[addr - 0x9C00] = byte,
+            0x9800..=0x9BFF => map0[addr - 0x9800] = byte,
+            0x9C00..=0x9FFF => map1[addr - 0x9C00] = byte,
             _ => unreachable!(),
         }
     }
@@ -459,11 +516,11 @@ impl Ppu {
             0xFF4A => self.wy,
             0xFF4B => self.wx,
 
-            0xFF4F => self.vbk,
+            0xFF4F => self.vbk & 0xFE,
             0xFF68 => self.bgpi,
-            0xFF69 => self.bgpd,
+            0xFF69 => self.cram_bg[(self.bgpi & 0x3F) as usize],
             0xFF6A => self.obpi,
-            0xFF6B => self.obpd,
+            0xFF6B => self.cram_obj[(self.obpi & 0x3F) as usize],
             0xFF6C => self.opri,
             
             _ => unreachable!()
@@ -496,9 +553,21 @@ impl Ppu {
 
             0xFF4F => self.vbk = byte,
             0xFF68 => self.bgpi = byte,
-            0xFF69 => self.bgpd = byte,
+            0xFF69 => {
+                self.cram_bg[(self.bgpi & 0x3F) as usize] = byte;
+                if self.bgpi & 0x80 != 0 {
+                    self.bgpi += 1;
+                    self.bgpi &= 0b10111111;
+                }
+            },
             0xFF6A => self.obpi = byte,
-            0xFF6B => self.obpd = byte,
+            0xFF6B => {
+                self.cram_obj[(self.obpi & 0x3F) as usize] = byte;
+                if self.obpi & 0x80 != 0 {
+                    self.obpi += 1;
+                    self.obpi &= 0b10111111;
+                }
+            },
             0xFF6C => self.opri = byte,
             _ => unreachable!()
         };
@@ -508,6 +577,13 @@ impl Ppu {
         self.dma = byte;
     }
 
+    /// signals if PPU has just entered HBlank
+    pub fn entered_hblank(&mut self) -> bool {
+        let ret = self.entered_hblank;
+        self.entered_hblank = false;
+        ret
+    }
+
     fn calc_mode_3_dots(&self) -> u32 {
         let mut res = MODE_3_MIN_DOTS + (self.scx % 8) as u32;
 
@@ -515,23 +591,42 @@ impl Ppu {
             res += 6;
         }
 
-        for i in &self.obj_buffer {
-            let x = self.oam[*i][1];
-            let offset = if self.win_enabled() && self.wy_cond && x + 7 <= self.wx { 
+        for obj in &self.obj_buffer {
+            let offset = if self.win_enabled() && self.wy_cond && (obj.x as u8) + 7 <= self.wx { 
                 0xFF - self.wx 
             } else { 
                 self.scx 
             };
             
-            res += 11 - min(5, (x as u16 + offset as u16) % 8) as u32;
+            res += 11 - min(5, (obj.x as u16 + offset as u16) % 8) as u32;
         }
 
         res
     }
 
-    fn apply_palette(colour_id: &u8, palette: &u8) -> u8 {
+    /// Returns index of colour in COLOURS (0-3)
+    fn apply_palette_dmg(colour_id: &u8, palette: &u8) -> u16 {
         let id = colour_id << 1;
-        (palette & (0x03 << id)) >> id
+        ((palette & (0x03 << id)) >> id) as u16
+    }
+
+    /// Returns RGB555 representation of colour
+    fn apply_palette_cgb(colour_id: &u8, cram: [u8; CRAM_SIZE], palette_id: &u8) -> u16 {
+        let index_0 = (*palette_id << 3) as usize + (*colour_id << 1) as usize;
+        let index_1 = index_0 + 1;
+        cram[index_0] as u16 | ((cram[index_1] as u16) << 8)
+    }
+
+    fn rgb555_to_argb8888(color: u16) -> [u8; BYTES_PER_PIXEL] {
+        let r5 = (color >> 0) & 0x1F;
+        let g5 = (color >> 5) & 0x1F;
+        let b5 = (color >> 10) & 0x1F;
+     
+        let r8 = (r5 * 255 + 15) / 31;
+        let g8 = (g5 * 255 + 15) / 31;
+        let b8 = (b5 * 255 + 15) / 31;
+    
+        [b8 as u8, g8 as u8, r8 as u8, 0xFF]
     }
 
     fn mode_to_num(mode: &Mode) -> u8 {
@@ -542,36 +637,99 @@ impl Ppu {
             Mode::Drawing3 => 3,
         }
     } 
+
+    fn is_cgb(&mut self) -> bool {
+        matches!(self.model, GBModel::CGB)
+    }
 }
+
+struct OAMEntry {
+    y: usize,
+    x: usize, 
+    tile_id: usize,
+    cgb_palette: u8,
+    cgb_use_bank_1: bool,
+    dmg_palette: bool,
+    x_flip: bool,
+    y_flip: bool,
+    has_priority: bool,
+}
+
+impl OAMEntry {
+    fn new(data: [u8; OAM_ENTRY_SIZE]) -> Self {
+        let attributes = data[3];
+
+        OAMEntry {
+            y: data[0] as usize,
+            x: data[1] as usize,
+            tile_id: data[2] as usize,
+            cgb_palette: attributes & 0x07,
+            cgb_use_bank_1: attributes & 0x08 != 0,
+            dmg_palette: attributes & 0x10 != 0,
+            x_flip: attributes & 0x20 != 0,
+            y_flip: attributes & 0x40 != 0,
+            has_priority: attributes & 0x80 == 0,
+        }
+    }
+
+    /// Calculates appriate tile id based on current y pos,
+    /// and if objects are 8 or 16 pixels tall.
+    fn fetch_tile_id(&self, lcd_y: usize, obj_size: u8) -> usize {
+        if obj_size == 16 {
+            if (lcd_y as usize + 8 >= self.y) ^ self.y_flip {
+                self.tile_id | 0x01
+            } else {
+                self.tile_id & 0xFE
+            }
+        } else {
+            self.tile_id
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
     use crate::{cartridge::Cartridge, cpu::Cpu};
 
-    use super::{LCD_HEIGHT, LCD_WIDTH};
+    const DMG_ACID: &str = "roms/tests/dmg-acid2.gb";
+    const DMG_CHECKHASH: u64 = 7936837427979048709;
 
-    const TEST_FILE: &str = "roms/tests/dmg-acid2.gb";
-    const CHECKSUM: u32 = 3249083280;
+    const CGB_ACID: &str = "roms/tests/cgb-acid2.gbc";
+    const CGB_CHECKHASH: u64 = 10090950622310532208;
 
     #[test]
-    fn ppu_test() {
-        let cartridge = Cartridge::from_file(TEST_FILE, false);
+    fn ppu_dmg_test() {
+        let cartridge = Cartridge::from_file(DMG_ACID, false);
         let mut cpu = Cpu::new(cartridge, crate::cpu::GBModel::DMG);
-
         let mut cycles: u32 = 0;
-
         while cycles < 5000000 {
             cycles += cpu.step() as u32;
         } 
-
-        let mut sum: u32 = 0;
         
-        for y in 0..LCD_HEIGHT {
-            for x in 0..LCD_WIDTH {
-                sum = sum.wrapping_add((cpu.bus.ppu.frame_buffer[x + LCD_WIDTH * y] as u32).wrapping_mul((x + LCD_WIDTH * y) as u32));
-            }
-        }
+        let hash = fnv1a(&cpu.bus.ppu.frame_buffer);
+        assert!(hash == DMG_CHECKHASH, "hash mismatch: got {} but expected {}", hash, DMG_CHECKHASH);
+    }
 
-        assert!(sum == CHECKSUM, "checksum mismatch: got {} but expected {}", sum, CHECKSUM);
+    #[test]
+    fn ppu_cgb_test() {
+        let cartridge = Cartridge::from_file(CGB_ACID, false);
+        let mut cpu = Cpu::new(cartridge, crate::cpu::GBModel::CGB);
+        let mut cycles: u32 = 0;
+        while cycles < 5000000 {
+            cycles += cpu.step() as u32;
+        } 
+        
+        let hash = fnv1a(&cpu.bus.ppu.frame_buffer);
+        assert!(hash == CGB_CHECKHASH, "hash mismatch: got {} but expected {}", hash, CGB_CHECKHASH);
+    }
+
+    fn fnv1a(bytes: &[u8]) -> u64 {
+        let mut hash = 0xcbf29ce484222325;
+        for byte in bytes {
+            hash = hash ^ (*byte as u64);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
     }
 }
