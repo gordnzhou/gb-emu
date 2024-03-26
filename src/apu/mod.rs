@@ -11,17 +11,13 @@ use sdl2::{AudioSubsystem, Sdl};
 
 use crate::cpu::GBModel;
 use crate::emulator::CYCLE_HZ;
+use crate::{AUDIO_SAMPLES, MASTER_VOLUME, SAMPLING_RATE_HZ};
 use self::channels::*;
 use envelope::Envelope;
 use length_counter::LengthCounter;
 use sweep::Sweep;
 
 const MAX_PERIOD: u32 = 2048;
-
-const SAMPLING_RATE_HZ: u32 = 48000;
-const AUDIO_SAMPLES: usize = 2048;
-
-const MASTER_VOLUME: f32 = 0.2;
 
 const WAVE_RAM_START: usize = 0xFF30;
 const WAVE_RAM_END: usize = 0xFF3F;
@@ -84,7 +80,7 @@ impl Apu {
             _audio_subsystem,
             pulse1: Pulse::new(true),
             pulse2: Pulse::new(false),
-            wave: Wave::new(),
+            wave: Wave::new(model),
             noise: Noise::new(),
             audio_buffer: [[0.0; 2]; AUDIO_SAMPLES * 4],
             buffer_index: 0,
@@ -207,8 +203,11 @@ impl Apu {
     }
 
     pub fn write_io(&mut self, addr: usize, byte: u8) {
-        // (for DMG only) NR52 and all length counters are preserved and writable while APU is powered off
-        let apu_off_readable = vec![0xFF26, 0xFF11, 0xFF16, 0xFF1B, 0xFF20];
+        // NR52 and (for DMG only) all length counters are preserved and writable while APU is powered off
+        let apu_off_readable = match self.model {
+            GBModel::DMG => vec![0xFF26, 0xFF11, 0xFF16, 0xFF1B, 0xFF20],
+            GBModel::CGB => vec![0xFF26],
+        };
         if !self.apu_on && !apu_off_readable.contains(&addr) {
             return;
         }
@@ -303,6 +302,7 @@ mod tests {
     use crate::{bus::{RAM_END, RAM_START}, cartridge::Cartridge, cpu::Cpu};
 
     const DMG_SOUND: &str = "roms/tests/dmg_sound.gb";
+    const CGB_SOUND: &str = "roms/tests/cgb_sound.gb";
     const TEST_NUMS: [&str; 12] = [
         "01:", "02:", "03:", "04:", 
         "05:", "06:", "07:", "08:", 
@@ -343,6 +343,46 @@ mod tests {
                         }
                     } else {
                         panic!("dmg_sound: Test #{} Failed", test_num);
+                    }
+                }
+            }
+        } 
+    }
+
+    #[test]
+    fn apu_cgb_sound_test() {
+        let mut cartridge = Cartridge::from_file(CGB_SOUND, false);
+        for i in RAM_START..RAM_END {
+            cartridge.write_ram(i, 0);
+        }
+        let mut cpu = Cpu::new(cartridge, crate::cpu::GBModel::CGB);
+    
+        let mut cycles: u64 = 0;
+        let mut test_num = 1;
+        while cycles < (1 << 32) {
+            cycles += cpu.step() as u64;
+
+            if cycles % (1 << 18) == 0 {
+                let mut output = String::new();
+
+                for i in RAM_START..RAM_END {
+                    let byte = cpu.bus.read_byte(i as u16);
+                    if byte != 0 {
+                        output.push(char::from(byte));
+                    }
+                }
+
+                if output.contains(TEST_NUMS[test_num - 1]) {
+                    let mut pass_output = String::from(TEST_NUMS[test_num - 1]);
+                    pass_output.push_str("ok");
+                    if output.contains(&pass_output) {
+                        println!("cgb_sound: Test #{} Passed", test_num);
+                        test_num += 1;
+                        if test_num > 12 {
+                            break;
+                        }
+                    } else {
+                        panic!("cgb_sound: Test #{} Failed", test_num);
                     }
                 }
             }

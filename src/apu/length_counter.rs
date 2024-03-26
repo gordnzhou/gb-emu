@@ -50,7 +50,7 @@ impl LengthCounter {
         }
     }
 
-    /// Obscure Behavior (DMG only): If the frame sequencer's next tick does not clock the counter and
+    /// Obscure Behavior: If the frame sequencer's next tick does not clock the counter and
     /// length enable bit goes from 0 to 1, decrements counter if counter is not zero; 
     /// channel is disabled if counter reached zero
     pub fn extra_clocking(&mut self, new_enabled: bool){

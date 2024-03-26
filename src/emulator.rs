@@ -9,18 +9,7 @@ use sdl2::EventPump;
 
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, GBModel};
-
-// in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
-pub const KEYMAPPINGS: [Keycode; 8] = [
-    Keycode::I,
-    Keycode::J,
-    Keycode::K,
-    Keycode::L,
-    Keycode::S,
-    Keycode::W,
-    Keycode::A,
-    Keycode::D,
-];
+use crate::{KEYMAPPINGS, SCREEN_SCALE};
 
 pub const LCD_WIDTH: usize= 160;
 pub const LCD_HEIGHT: usize = 144;
@@ -41,7 +30,6 @@ const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
 
 pub struct Emulator {
     event_pump: EventPump,
-    screen_scale: i32,
     canvas: Canvas<Window>,
     key_status: u8,
     cpu: Cpu,
@@ -49,11 +37,11 @@ pub struct Emulator {
 
 impl Emulator {
     /// Loads in given cartridge and initializes Gameboy emulator.
-    pub fn load_cartridge(screen_scale: i32, cartridge: Cartridge) -> Result<Self, String> {
+    pub fn load_cartridge(cartridge: Cartridge) -> Result<Self, String> {
         let sdl_context: Sdl = sdl2::init()?;
 
         let window_title = &cartridge.get_title();
-        let canvas = Emulator::build_canvas(&sdl_context, screen_scale as u32, window_title)?;
+        let canvas = Emulator::build_canvas(&sdl_context, SCREEN_SCALE as u32, window_title)?;
         let event_pump = sdl_context.event_pump()?;
 
         let model = if cartridge.cgb_compatible() {
@@ -66,7 +54,6 @@ impl Emulator {
         Ok(Emulator {
             event_pump,
             canvas,
-            screen_scale,
             key_status: 0xFF,
             cpu: Cpu::new(cartridge, model).with_audio(sdl_context),
         })
@@ -91,7 +78,7 @@ impl Emulator {
             .build()
             .map_err(|e| e.to_string())?;
 
-        let title = &format!("Playing: {}", title);
+        let title = &format!("MelonBoy | Playing: {}", title);
         canvas.window_mut().set_title(title).unwrap();
         Ok(canvas)
     }
@@ -106,8 +93,8 @@ impl Emulator {
             .map_err(|e| e.to_string())
             .unwrap();
 
-        let screen_width = LCD_WIDTH as u32 * self.screen_scale as u32;
-        let screen_height = LCD_HEIGHT as u32 * self.screen_scale as u32;
+        let screen_width = LCD_WIDTH as u32 * SCREEN_SCALE as u32;
+        let screen_height = LCD_HEIGHT as u32 * SCREEN_SCALE as u32;
         let rect = Rect::new(0, 0, screen_width, screen_height);
 
         // NOTE: cycle timings seem to be controlled by APU audio callback 
@@ -123,15 +110,17 @@ impl Emulator {
 
     /// Gets user input and updates screen, once every frame.
     fn next_frame(&mut self, texture: &mut Texture, rect: Rect) {
+        if self.cpu.bus.ppu.entered_hblank() {
+            match self.get_events() {
+                Ok(_) => self.cpu.bus.joypad.step(self.key_status),
+                Err(e) => panic!("{}", e)
+            }
+        }
+        
         if !self.cpu.bus.ppu.entered_vblank {
             return;
         }
         self.cpu.bus.ppu.entered_vblank = false;
-
-        match self.get_events() {
-            Ok(_) => self.cpu.bus.joypad.step(self.key_status),
-            Err(e) => panic!("{}", e)
-        }
 
         texture
             .update(None, &self.cpu.bus.ppu.frame_buffer, LCD_BYTE_WIDTH)

@@ -1,6 +1,7 @@
 extern crate sdl2;
 
 mod cpu;
+mod config;
 mod bus;
 mod ppu;
 mod apu;
@@ -12,20 +13,18 @@ mod emulator;
 use cartridge::Cartridge;
 use cpu::{mooneye_fail_check, mooneye_pass_check, Cpu, GBModel};
 use emulator::Emulator;
+use config::*;
 
-const ROM_PATH: &str = "roms/pokemongold.gbc";
-
-const SCREEN_SCALE: i32 = 5;
+const ROM_PATH: &str = "roms/zeldaoracle.gbc";
 
 fn main() -> Result<(), String> {
 
     let cartridge = Cartridge::from_file(ROM_PATH, false);
-    let mut emulator = Emulator::load_cartridge(SCREEN_SCALE, cartridge)?;
+    let mut emulator = Emulator::load_cartridge(cartridge)?;
     emulator.run_for_duration(40e12 as u64);
 
     Ok(())
 }
-
 
 const TIMEOUT: u64 = 1 << 32;
 

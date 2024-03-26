@@ -1,9 +1,12 @@
+use crate::cpu::GBModel;
+
 use super::{LengthCounter, MAX_PERIOD, WAVE_RAM_START};
 
 const WAVE_RAM_SIZE: usize = 16;
 const LENGTH_TICKS: u32 = 256;
 
 pub struct Wave {
+    model: GBModel,
     nr30: u8,
     nr31: u8,
     nr32: u8,
@@ -20,8 +23,9 @@ pub struct Wave {
 }
 
 impl Wave {
-    pub fn new() -> Self {
+    pub fn new(model: GBModel) -> Self {
         Wave {
+            model,
             nr30: 0,
             nr31: 0,
             nr32: 0, 
@@ -135,7 +139,7 @@ impl Wave {
             // channel is on will access the current sample buffer IF it was updated 
             // by wave RAM at most 2 cycles ago; 
             // otherwise reads return 0xFF and write does nothing.
-            if self.wave_reads_0xff {
+            if matches!(self.model, GBModel::DMG) && self.wave_reads_0xff {
                0xFF
             } else {
                 self.sample_buffer
@@ -148,7 +152,9 @@ impl Wave {
     pub fn write_wave_ram(&mut self, addr: usize, byte: u8) {
         if self.channel_on() && self.dac_on() {
             // Obscure Behavior (DMG only): SEE ABOVE
-            if !self.wave_reads_0xff {
+            if matches!(self.model, GBModel::DMG) && self.wave_reads_0xff {
+                
+            } else {
                 self.wave_ram[self.sample_index / 2] = byte;
             }
         } else {
@@ -177,13 +183,15 @@ impl Wave {
 
         // Obscure Behavior (DMG only): Triggering while sample byte is being processed
         // corrupts wave RAM based on the current sample's position.
-        if self.channel_on() && self.dac_on && self.freq_counter <= 1 {
-            let next_byte_index = ((self.sample_index + 1) / 2) % WAVE_RAM_SIZE;
-            if next_byte_index < 4 {
-                self.wave_ram[0] = self.wave_ram[next_byte_index];
-            } else {
-                let segment = (next_byte_index / 4) * 4;
-                self.wave_ram.copy_within(segment..=segment+3 , 0);
+        if matches!(self.model, GBModel::DMG) {
+            if self.channel_on() && self.dac_on && self.freq_counter <= 1 {
+                let next_byte_index = ((self.sample_index + 1) / 2) % WAVE_RAM_SIZE;
+                if next_byte_index < 4 {
+                    self.wave_ram[0] = self.wave_ram[next_byte_index];
+                } else {
+                    let segment = (next_byte_index / 4) * 4;
+                    self.wave_ram.copy_within(segment..=segment+3 , 0);
+                }
             }
         }
 
@@ -194,8 +202,8 @@ impl Wave {
         if byte & 0x80 != 0 {
             self.length_counter.on_trigger();
             self.freq_counter = MAX_PERIOD - self.period_value() + 3;
-            self.sample_buffer = self.wave_ram[self.sample_index / 2];
             self.sample_index = 0;
+            self.sample_buffer = self.wave_ram[self.sample_index / 2];
         }
     }
 

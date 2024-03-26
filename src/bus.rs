@@ -28,6 +28,7 @@ const HRAM_START: usize = 0xFF80;
 const HRAM_END: usize = 0xFFFE;
 
 const DMA_CYCLES: u16 = 160;
+const HDMA_BLOCK_SIZE: usize = 0x10;
 
 pub struct Bus {
     model: GBModel,
@@ -57,6 +58,7 @@ pub struct Bus {
     svbk: u8,
     hdma_bytes: usize,
     hdma_running: bool,
+    hdma_length: u8,
 }
 
 impl Bus {
@@ -88,6 +90,7 @@ impl Bus {
             svbk: 0,
             hdma_bytes: 0,
             hdma_running: false,
+            hdma_length: 0,
         }
     }
 
@@ -101,8 +104,6 @@ impl Bus {
     /// NOTE: This stepping is affected by double speed mode on CGB
     pub fn partial_step(&mut self, cycles: u8) {
         self.step_oam_dma(cycles);
-
-        self.step_vram_hdma();
 
         let old_div = self.timer.div;
         if self.timer.step(cycles) {
@@ -126,6 +127,10 @@ impl Bus {
         self.apu.step(cycles as u32);
         
         self.ppu.step(cycles);
+
+        if self.is_cgb() {
+            self.step_vram_hdma();
+        }
 
         if self.ppu.entered_vblank {
             self.request_interrupt(Interrupt::VBlank);
@@ -256,22 +261,23 @@ impl Bus {
     /// Writes to HDMA5 register and initializes HDMA transfer
     fn write_hdma5(&mut self, byte: u8) {
         self.hdma5 = byte;
+        self.hdma_length = byte & 0x7F;
+        self.hdma_bytes = 0;
                
         if byte & 0x80 == 0 {
-            let transfer_length = self.transfer_length();
-            let source_start = self.hdma_source_start();
-            let dest_start = self.hdma_dest_start();
+            if self.hdma_running {
+                self.hdma_running = false;
+                return;
+            }
 
-            for i in 0..transfer_length {
-                let byte = self.read_byte((source_start + i) as u16);
-                self.ppu.write_vram(dest_start + i, byte)
+            for _ in 0..self.hdma_transfer_blocks() {
+                self.transfer_block_to_vram();
             }
 
             self.hdma_running = false;
+            self.hdma_length = 0x7F;
         } else {
             self.hdma_running = true;
-            self.hdma_bytes = 0;
-            self.step_vram_hdma();
         }
     }
 
@@ -291,37 +297,43 @@ impl Bus {
         }
     }
 
-    /// If HBLank DMA is running, transfers 0x10 bytes to VRAM at each HBlank.
+    /// If HDMA is running, transfers 0x10 bytes to VRAM at each HBlank.
     fn step_vram_hdma(&mut self) {
         if !self.ppu.entered_hblank() || !self.hdma_running {
             return;
         }
 
-        let transfer_length = self.transfer_length();
-        let source_start = self.hdma_source_start();
-        let dest_start = self.hdma_dest_start();
+        self.transfer_block_to_vram();
+        self.hdma_length -= 1;
 
-        for i in  0..0x10 {
-            let byte = self.read_byte((source_start + self.hdma_bytes + i) as u16);
-            self.ppu.write_vram(dest_start + self.hdma_bytes + i, byte);
-        }
-
-        self.hdma_bytes += 0x10;
-        if self.hdma_bytes >= transfer_length {
+        if self.hdma_bytes == self.hdma_transfer_blocks() * HDMA_BLOCK_SIZE {
             self.hdma_running = false;
+            self.hdma_length = 0x7F;
         }
     }
 
     fn read_hdma5(&self) -> u8 {
-        if !self.hdma_running {
-            0xFF
+        let status = if !self.hdma_running {
+            0x80
         } else {
-            ((self.transfer_length() - 1 - self.hdma_bytes) / 0x10) as u8
-        }
+            0x00
+        };
+        status | self.hdma_length
     }
 
-    fn transfer_length(&self) -> usize {
-       ((self.hdma5 as usize & 0x7F) + 1) * 0x10
+    fn transfer_block_to_vram(&mut self) {
+        let source_start = self.hdma_source_start();
+        let dest_start = self.hdma_dest_start();
+
+        for i in  0..HDMA_BLOCK_SIZE {
+            let byte = self.read_byte((source_start + self.hdma_bytes + i) as u16);
+            self.ppu.write_vram(dest_start + self.hdma_bytes + i, byte);
+        }
+        self.hdma_bytes += HDMA_BLOCK_SIZE;
+    }
+
+    fn hdma_transfer_blocks(&self) -> usize {
+       (self.hdma5 as usize & 0x7F) + 1
     }
 
     fn hdma_source_start(&self) -> usize {
@@ -329,7 +341,7 @@ impl Bus {
     }
 
     fn hdma_dest_start(&self) -> usize {
-        0x8000 | (((self.hdma3 as usize) << 8)| self.hdma4 as usize) & 0x1FF0
+        0x8000 | ((((self.hdma3 as usize) << 8)| self.hdma4 as usize) & 0x1FF0)
     }
 
     /// Sets given interrupt's bit in IF, which requests for that interrupt.

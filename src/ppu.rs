@@ -1,6 +1,6 @@
 use std::cmp::min;
 
-use crate::{cpu::GBModel, emulator::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH}};
+use crate::{cpu::GBModel, emulator::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH}, COLOURS, WITH_COLOUR_CORRECTION};
 
 const TILE_SIZE: usize = 16;
 const TILE_ENTRIES: usize = 384;
@@ -20,13 +20,6 @@ const SCAN_LINE_DOTS: u32 = 456;
 const MODE_1_DOTS: u32 = SCAN_LINE_DOTS * 10;
 const MODE_2_DOTS: u32 = 80;
 const MODE_3_MIN_DOTS: u32 = 172;
-
-pub const COLOURS: [[u8; BYTES_PER_PIXEL]; 4] = [
-    [0x0F, 0xBC, 0x9B, 0xFF], // #9BBC0F => white
-    [0x0F, 0xAC, 0x8B, 0xFF], // #8BAC0F => light grey
-    [0x30, 0x62, 0x30, 0xFF], // #306230 => dark grey
-    [0x0F, 0x38, 0x0F, 0xFF], // #0F380F => black
-];
 
 #[derive(PartialEq)]
 enum Mode {
@@ -141,6 +134,7 @@ impl Ppu {
     pub fn step(&mut self, cycles: u8) {
         if self.lcd_ppu_disabled() { return; }
         self.stat_triggered = false;
+        self.entered_hblank = false;
 
         let dots = cycles as u32 * 4;
         let next_dots = self.mode_elapsed_dots + dots;
@@ -225,10 +219,12 @@ impl Ppu {
             Mode::OamScan2 => {
                 let mut fetches = (dots + 1) / 2;
                 while fetches > 0 && self.obj_buffer_index < OAM_ENTRIES && self.obj_buffer.len() < 10 {
+
                     let obj_y = self.oam[self.obj_buffer_index][0];   
                     if self.ly + 16 >= obj_y && self.ly + 16 < obj_y + self.obj_size()  {
                         self.obj_buffer.push(OAMEntry::new(self.oam[self.obj_buffer_index]));
                     }
+
                     self.obj_buffer_index += 1;
                     fetches -= 1;
                 }
@@ -262,13 +258,17 @@ impl Ppu {
         self.update_stat();
     }
 
+    /// Returns colour index (for DMG), or RGB555 representation (for CGB) of pixel at position (lcd_x, lcd_y) 
     fn render_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> u16 {
-        let (mut colour, bg_priority, bg_is_0) = self.render_bgwin_pixel(lcd_x, lcd_y);
-        colour = self.render_obj_pixel(colour, lcd_x, lcd_y, bg_priority, bg_is_0);
+        let (mut colour, bg_priority, bg_is_0) = self.apply_bg(lcd_x, lcd_y);
+        colour = self.render_obj(colour, lcd_x, lcd_y, bg_priority, bg_is_0);
         colour
     }
 
-    fn render_bgwin_pixel(&mut self, lcd_x: usize, lcd_y: usize) -> (u16, bool, bool) {
+    /// Applies BG OR Window tile to current (x, y) position in LCD
+    /// Returns BG/Window's colour, and its priority attribute (CGB only) 
+    /// and if its id is 0 for deciding obj priority
+    fn apply_bg(&mut self, lcd_x: usize, lcd_y: usize) -> (u16, bool, bool) {
         let mut is_bg = true;
         let mut x = (lcd_x + self.scx as usize) % 0xFF;
         let mut y = (lcd_y as usize + self.scy as usize) % 0xFF;
@@ -286,11 +286,11 @@ impl Ppu {
         match self.model {
             GBModel::DMG => {
                 if self.lcdc & 0x01 == 0 {
-                    return (0, false, false);
+                    return (0, false, true);
                 }
 
-                let colour_id = self.fetch_tile_pixel(self.lcdc & 0x10 == 0, tile_id, x, y, false, false, false);
-                (Ppu::apply_palette_dmg(&colour_id, &self.bgp), false, false)
+                let colour_id = self.fetch_colour_id(tile_id, false, self.lcdc & 0x10 == 0, x, y, false, false);
+                (Ppu::apply_palette_dmg(&colour_id, &self.bgp), false, colour_id == 0)
             }
             GBModel::CGB => {
                 let attributes = self.fetch_bgwin_attribute(tmap_addr, is_bg);
@@ -300,14 +300,17 @@ impl Ppu {
                 let y_flip = attributes & 0x40 != 0;
                 let priority = attributes & 0x80 != 0;
 
-                let colour_id = self.fetch_tile_pixel(self.lcdc & 0x10 == 0, tile_id, x, y, x_flip, y_flip, bank);
+                let colour_id = self.fetch_colour_id(tile_id, bank, self.lcdc & 0x10 == 0, x, y, x_flip, y_flip);
                 (Ppu::apply_palette_cgb(&colour_id, self.cram_bg, &palette), priority, colour_id == 0)
             }
         }
 
     }
 
-    fn render_obj_pixel(&self, bg_colour: u16, lcd_x: usize, lcd_y: usize, bg_priority: bool, bg_is_0: bool) -> u16 {
+    /// Applies object tile (if any) to current (x, y) position in LCD.
+    /// Decides if object covers BG based LCDC bit 0, Object's priority attribute, 
+    /// BG tile's priority attribute (CGB Only) and if the BG tile has an id of 0.
+    fn render_obj(&self, bg_colour: u16, lcd_x: usize, lcd_y: usize, bg_priority: bool, bg_is_0: bool) -> u16 {
         let mut colour = bg_colour;
 
         for obj in &self.obj_buffer {
@@ -323,13 +326,13 @@ impl Ppu {
             let tile_x = lcd_x + 8 - obj.x;
             let tile_y = lcd_y as usize + 16 - obj.y;
             let use_bank_1 = obj.cgb_use_bank_1 && matches!(self.model, GBModel::CGB);
-            let id = self.fetch_tile_pixel(false, tile_id as u8, tile_x, tile_y, 
-                obj.x_flip, obj.y_flip, use_bank_1);
+            let id = self.fetch_colour_id(tile_id as u8, use_bank_1, false, tile_x, tile_y, 
+                obj.x_flip, obj.y_flip);
 
             if id != 0 { 
                 match self.model {
                     GBModel::DMG => {
-                        if colour == 0 || obj.has_priority {
+                        if bg_is_0 || obj.has_priority {
                             let palette = if !obj.dmg_palette { self.obp0 } else { self.obp1 };
                             colour = Ppu::apply_palette_dmg(&id, &palette);
                         }
@@ -347,9 +350,10 @@ impl Ppu {
         colour
     }
 
-    /// Returns colour id from tile_id's tile at (tile_x, tile_y).
-    /// Set addr_mode to false for 0x8000 tile_data addressing, true for 0x8800 addressing.
-    fn fetch_tile_pixel(&self, addr_mode: bool, tile_id: u8, tile_x: usize, tile_y: usize, x_flip: bool, y_flip: bool, bank: bool) -> u8 {
+    /// Gets tile at tile_id from tile_data0 (or tile_data1 if bank = true and model is CGB) 
+    /// starting at 0x8000 (addr_mode = true) or 0x8800 (addr_mode = false), 
+    /// then returns the tile's colour_id at (tile_x, tile_y) after applying x_flip and y_flip.
+    fn fetch_colour_id(&self, tile_id: u8, bank: bool, addr_mode: bool, tile_x: usize, tile_y: usize, x_flip: bool, y_flip: bool) -> u8 {
         let mut tile_data = &self.tile_data0;
         if bank && matches!(self.model, GBModel::CGB) {
             tile_data = &self.tile_data1;
@@ -579,9 +583,7 @@ impl Ppu {
 
     /// signals if PPU has just entered HBlank
     pub fn entered_hblank(&mut self) -> bool {
-        let ret = self.entered_hblank;
-        self.entered_hblank = false;
-        ret
+        self.entered_hblank
     }
 
     fn calc_mode_3_dots(&self) -> u32 {
@@ -617,16 +619,31 @@ impl Ppu {
         cram[index_0] as u16 | ((cram[index_1] as u16) << 8)
     }
 
-    fn rgb555_to_argb8888(color: u16) -> [u8; BYTES_PER_PIXEL] {
-        let r5 = (color >> 0) & 0x1F;
-        let g5 = (color >> 5) & 0x1F;
-        let b5 = (color >> 10) & 0x1F;
-     
-        let r8 = (r5 * 255 + 15) / 31;
-        let g8 = (g5 * 255 + 15) / 31;
-        let b8 = (b5 * 255 + 15) / 31;
-    
-        [b8 as u8, g8 as u8, r8 as u8, 0xFF]
+    fn rgb555_to_argb8888(colour: u16) -> [u8; BYTES_PER_PIXEL] {
+        let r5 = (colour >> 0) & 0x1F;
+        let g5 = (colour >> 5) & 0x1F;
+        let b5 = (colour >> 10) & 0x1F;
+        
+        let (blue, green, red) = if WITH_COLOUR_CORRECTION {
+            // CREDITS FOR COLOUR CORRECTION ALGORITHM:
+            // https://saveweb.github.io/near.sh/articles/video/color-emulation.html
+
+            let r = r5 * 26 + g5 * 4  + b5 * 2;
+            let g =           g5 * 24 + b5 * 8;
+            let b = r5 * 6  + g5 * 4  + b5 * 22;
+
+            let red = min(960, r) >> 2;
+            let green = min(960, g) >> 2;
+            let blue = min(960, b) >> 2;
+            (blue as u8, green as u8, red as u8)
+        } else {
+            let r8 = (r5 * 255 + 15) / 31;
+            let g8 = (g5 * 255 + 15) / 31;
+            let b8 = (b5 * 255 + 15) / 31;
+            (b8 as u8, g8 as u8, r8 as u8)
+        };
+
+        [blue, green, red, 0xFF]
     }
 
     fn mode_to_num(mode: &Mode) -> u8 {
@@ -696,7 +713,7 @@ mod tests {
     const DMG_CHECKHASH: u64 = 7936837427979048709;
 
     const CGB_ACID: &str = "roms/tests/cgb-acid2.gbc";
-    const CGB_CHECKHASH: u64 = 10090950622310532208;
+    const CGB_CHECKHASH: u64 = 15571388372626634589;
 
     #[test]
     fn ppu_dmg_test() {
