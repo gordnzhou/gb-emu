@@ -136,9 +136,7 @@ impl Bus {
             t_cycles /= 2;
         }
 
-        if self.is_cgb() {
-            t_cycles += self.step_vram_dma();
-        }
+        t_cycles += self.step_vram_dma();
 
         self.apu.step(t_cycles);
         
@@ -279,9 +277,9 @@ impl Bus {
         if byte & 0x80 == 0 {
             if matches!(self.hdma_mode, HDMAMode::HDMA) {
                 self.hdma_mode = HDMAMode::None;
-                return;
+            } else {
+                self.hdma_mode = HDMAMode::GDMA;
             }
-            self.hdma_mode = HDMAMode::GDMA;
         } else {
             self.hdma_mode = HDMAMode::HDMA;
         }

@@ -712,7 +712,9 @@ mod tests {
     use crate::{cartridge::Cartridge, cpu::Cpu};
 
     const DMG_ACID: &str = "roms/tests/dmg-acid2.gb";
-    const DMG_CHECKHASH: u64 = 7936837427979048709;
+
+    // NOTE: DMG_CHECKHASH depends on COLOURS constant
+    const DMG_CHECKHASH: u64 = 17255647646328982741;
 
     const CGB_ACID: &str = "roms/tests/cgb-acid2.gbc";
     const CGB_CHECKHASH: u64 = 15571388372626634589;

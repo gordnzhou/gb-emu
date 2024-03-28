@@ -15,11 +15,12 @@ use cpu::{mooneye_fail_check, mooneye_pass_check, Cpu, GBModel};
 use emulator::Emulator;
 use config::*;
 
-const ROM_PATH: &str = "roms/tests/cgb-acid2.gbc";
+const ROM_PATH: &str = "roms/drmario.gb";
+const WITH_BOOTROM: bool = false;
 
 fn main() -> Result<(), String> {
 
-    let cartridge = Cartridge::from_file(ROM_PATH, false);
+    let cartridge = Cartridge::from_file(ROM_PATH, WITH_BOOTROM);
     let mut emulator = Emulator::load_cartridge(cartridge)?;
     emulator.run_for_duration(40e12 as u64);
 

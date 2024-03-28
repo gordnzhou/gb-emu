@@ -38,6 +38,7 @@ pub struct Apu {
     nr52: u8,
     nr51: u8,
     nr50: u8,
+    t_cycles: u8,
 
     pcm12: u8,
     pcm34: u8,
@@ -88,6 +89,7 @@ impl Apu {
             nr52: 0,
             nr51: 0,
             nr50: 0,
+            t_cycles: 0,
 
             pcm12: 0,
             pcm34: 0,
@@ -110,23 +112,26 @@ impl Apu {
             return;
         }
 
-        let m_cycles = t_cycles / 4;
-        for _ in 0..m_cycles {
-            let pulse1_sample = self.pulse1.make_sample();
-            let pulse2_sample = self.pulse2.make_sample();
-            let wave_sample = self.wave.make_sample();
-            let noise_sample = self.noise.make_sample();
+        for _ in 0..t_cycles {
+            self.t_cycles = self.t_cycles.wrapping_add(1);
+            if self.t_cycles % 4 == 0 {
+                
+                let pulse1_sample = self.pulse1.make_sample();
+                let pulse2_sample = self.pulse2.make_sample();
+                let wave_sample = self.wave.make_sample();
+                let noise_sample = self.noise.make_sample();
 
-            if matches!(self.model, GBModel::CGB) {
-                self.pcm12 = (pulse2_sample << 4) | pulse1_sample;
-                self.pcm34 = (noise_sample << 4) | wave_sample; 
+                if matches!(self.model, GBModel::CGB) {
+                    self.pcm12 = (pulse2_sample << 4) | pulse1_sample;
+                    self.pcm34 = (noise_sample << 4) | wave_sample; 
+                }
+                
+                if self.sample_gather == (M_CYCLE_HZ / SAMPLING_RATE_HZ) {
+                    self.sample_gather = 0;
+                    self.push_samples_to_buffer(pulse1_sample, pulse2_sample, wave_sample, noise_sample)
+                }
+                self.sample_gather += 1;
             }
-            
-            if self.sample_gather == (M_CYCLE_HZ / SAMPLING_RATE_HZ) {
-                self.sample_gather = 0;
-                self.push_samples_to_buffer(pulse1_sample, pulse2_sample, wave_sample, noise_sample)
-            }
-            self.sample_gather += 1;
         }
 
         self.push_to_callback();
