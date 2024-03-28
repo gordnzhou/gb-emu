@@ -27,9 +27,9 @@ pub const COLOURS: [[u8; BYTES_PER_PIXEL]; 4] = [
     [0x0F, 0x38, 0x0F, 0xFF], // => black
 ];
 
-pub const DMG_BOOTROM_PATH: &str = "roms/bootrom.gb";
+pub const DMG_BOOTROM_PATH: &str = "bootroms/bootrom.gb";
 
-pub const CGB_BOOTROM_PATH: &str = "roms/bootrom.gbc";
+pub const CGB_BOOTROM_PATH: &str = "bootroms/bootrom.gbc";
 
 pub const SAMPLING_RATE_HZ: u32 = 48000;
 

@@ -130,13 +130,13 @@ impl Ppu {
         }
     }
 
-    /// Steps through the PPU over the given period (in cycles).
-    pub fn step(&mut self, cycles: u8) {
+    /// Steps through the PPU over the given period (in dots).
+    /// NOTE: 1 dot = 1 T-Cycle (= 1/4 M-Cycle)
+    pub fn step(&mut self, dots: u32) {
         if self.lcd_ppu_disabled() { return; }
         self.stat_triggered = false;
         self.entered_hblank = false;
 
-        let dots = cycles as u32 * 4;
         let next_dots = self.mode_elapsed_dots + dots;
         let mode_end = match self.mode {
             Mode::HBlank0 => SCAN_LINE_DOTS - self.mode_3_dots - MODE_2_DOTS,
@@ -185,9 +185,11 @@ impl Ppu {
                 Mode::OamScan2
             },
             Mode::OamScan2 => {
+                self.wy_cond |= self.wy == self.ly;
                 self.wx_cond = false;
                 self.obj_buffer_index = 0;
-                if !self.is_cgb() || self.opri != 0 {
+
+                if !self.is_cgb() || (self.opri & 0x01) != 0 {
                     self.obj_buffer.sort_by(|a, b| { a.x.cmp(&b.x)});
                 }
                 self.mode_3_dots = self.calc_mode_3_dots();
@@ -232,7 +234,6 @@ impl Ppu {
             Mode::Drawing3 => {
                 let mut pixels_left = dots;
                 while self.cur_pixel_x < LCD_WIDTH && pixels_left > 0 {
-                    self.wy_cond |= self.wy == self.ly;
                     self.wx_cond = self.wx as usize <= self.cur_pixel_x + 7;
 
                     // future TODO (maybe): implement BG and OAM FIFO 
@@ -271,7 +272,7 @@ impl Ppu {
     fn apply_bg(&mut self, lcd_x: usize, lcd_y: usize) -> (u16, bool, bool) {
         let mut is_bg = true;
         let mut x = (lcd_x + self.scx as usize) % 0xFF;
-        let mut y = (lcd_y as usize + self.scy as usize) % 0xFF;
+        let mut y = (lcd_y + self.scy as usize) % 0xFF;
 
         if self.win_enabled() && self.wx_cond && self.wy_cond {
             self.line_has_window = true;
@@ -332,13 +333,13 @@ impl Ppu {
             if id != 0 { 
                 match self.model {
                     GBModel::DMG => {
-                        if bg_is_0 || obj.has_priority {
+                        if bg_is_0 || !obj.bg_priority {
                             let palette = if !obj.dmg_palette { self.obp0 } else { self.obp1 };
                             colour = Ppu::apply_palette_dmg(&id, &palette);
                         }
                     }
                     GBModel::CGB => {
-                        if bg_is_0 || self.lcdc & 0x01 == 0 || (obj.has_priority && !bg_priority) {
+                        if bg_is_0 || self.lcdc & 0x01 == 0 || (!obj.bg_priority && !bg_priority) {
                             colour = Ppu::apply_palette_cgb(&id, self.cram_obj, &obj.cgb_palette)
                         }
                     }
@@ -434,6 +435,7 @@ impl Ppu {
     }
 
     fn reset_lcd(&mut self) {
+        self.stat_line = false;
         self.frame_buffer = [0; LCD_BYTE_WIDTH * LCD_HEIGHT];
     }
 
@@ -443,7 +445,7 @@ impl Ppu {
         let mut map0= &self.tile_map0;
         let mut map1 = &self.tile_map1;
 
-        if self.vbk > 0 && matches!(self.model, GBModel::CGB) {
+        if (self.vbk & 0x01) != 0 && matches!(self.model, GBModel::CGB) {
             tile_data = &self.tile_data1;
             map0 = &self.attr_map0;
             map1 = &self.attr_map1;
@@ -466,7 +468,7 @@ impl Ppu {
         let mut map0= &mut self.tile_map0;
         let mut map1 = &mut self.tile_map1;
 
-        if self.vbk > 0 && matches!(self.model, GBModel::CGB) {
+        if (self.vbk & 0x01) != 0 && matches!(self.model, GBModel::CGB) {
             tile_data = &mut self.tile_data1;
             map0 = &mut self.attr_map0;
             map1 = &mut self.attr_map1;
@@ -555,7 +557,7 @@ impl Ppu {
             0xFF4A => self.wy = byte,
             0xFF4B => self.wx = byte,
 
-            0xFF4F => self.vbk = byte,
+            0xFF4F => self.vbk = byte & 0x01,
             0xFF68 => self.bgpi = byte,
             0xFF69 => {
                 self.cram_bg[(self.bgpi & 0x3F) as usize] = byte;
@@ -572,7 +574,7 @@ impl Ppu {
                     self.obpi &= 0b10111111;
                 }
             },
-            0xFF6C => self.opri = byte,
+            0xFF6C => self.opri = byte & 0x01,
             _ => unreachable!()
         };
     }
@@ -594,7 +596,7 @@ impl Ppu {
         }
 
         for obj in &self.obj_buffer {
-            let offset = if self.win_enabled() && self.wy_cond && (obj.x as u8) + 7 <= self.wx { 
+            let offset = if self.win_enabled() && self.wy_cond && self.wx_cond { 
                 0xFF - self.wx 
             } else { 
                 self.scx 
@@ -669,7 +671,7 @@ struct OAMEntry {
     dmg_palette: bool,
     x_flip: bool,
     y_flip: bool,
-    has_priority: bool,
+    bg_priority: bool,
 }
 
 impl OAMEntry {
@@ -685,7 +687,7 @@ impl OAMEntry {
             dmg_palette: attributes & 0x10 != 0,
             x_flip: attributes & 0x20 != 0,
             y_flip: attributes & 0x40 != 0,
-            has_priority: attributes & 0x80 == 0,
+            bg_priority: attributes & 0x80 != 0,
         }
     }
 

@@ -24,7 +24,7 @@ pub struct Cpu {
     pub(self) halted: bool,
     pub(self) halt_bug: bool,
     pub(self) halt_triggered: bool,
-    pub(self) cycles_so_far: u8,
+    pub(self) t_cycles_so_far: u32,
 
     pub(self) af: Register,
     pub(self) bc: Register,
@@ -34,7 +34,6 @@ pub struct Cpu {
     pub(self) sp: Register,
 
     // CGB ONLY
-    double_speed: bool,
     do_speed_switch: bool,
 }
 
@@ -79,14 +78,13 @@ impl Cpu {
             halted: false,
             halt_bug: false,
             halt_triggered: false,
-            cycles_so_far: 0,
+            t_cycles_so_far: 0,
             af: Register(af),
             bc: Register(bc),
             de: Register(de),
             hl: Register(hl),
             pc: Register(pc),
             sp: Register(sp),
-            double_speed: false,
             do_speed_switch: false,
         }
     }
@@ -97,28 +95,23 @@ impl Cpu {
     }
 
     /// Steps through all parts of the emulator over the period
-    /// that the next CPU instruction will take; returns that period's length in M-cycles.
-    pub fn step(&mut self) -> u8 {
-        let mut cycles = self.cycle();
-        if self.double_speed {
-            cycles += self.cycle();
-            cycles /= 2;
-        }
+    /// that the next CPU instruction will take; returns that period's length in T-cycles.
+    pub fn step(&mut self) -> u32 {
+        let t_cycles = self.cycle();
 
         if matches!(self.model, GBModel::CGB) && self.do_speed_switch {
             self.do_speed_switch = false;
-            self.double_speed = !self.double_speed;
             // TODO: implement pausing after STOP instruction triggers speed switch
-            return 200 
+            return 2560 
         }
 
-        self.bus.step(cycles);
+        self.bus.step(t_cycles);
        
-        cycles
+        t_cycles
     }
 
-    /// Do a CPU fetch-execute cycle and return the number of clock M-cycles taken.
-    fn cycle(&mut self) -> u8 {
+    /// Do a CPU fetch-execute cycle and return the number of T-cycles taken.
+    fn cycle(&mut self) -> u32 {
         self.halt_triggered = false;
 
         if self.scheduled_ei {
@@ -126,16 +119,16 @@ impl Cpu {
             self.scheduled_ei = false;
         }
         
-        let mut cycles = if !self.halted {
-            self.execute_next_instruction()
+        let mut t_cycles = if !self.halted {
+            self.execute_next_instruction() * 4
         } else {
-            1
+            4
         };
 
         match self.get_pending_interrupt() {
             Some(interrupt) => {
                 if self.ime {
-                    cycles += self.handle_interrupt(interrupt);
+                    t_cycles += self.handle_interrupt(interrupt) * 4;
                 } else if self.halt_triggered {
                     self.halt_bug = true;
                 }
@@ -146,12 +139,12 @@ impl Cpu {
             None => {}
         }
 
-        if cycles > self.cycles_so_far {
-            self.bus.partial_step(cycles - self.cycles_so_far);
+        if t_cycles > self.t_cycles_so_far {
+            self.bus.partial_step(t_cycles - self.t_cycles_so_far);
         }
-        self.cycles_so_far = 0;
+        self.t_cycles_so_far = 0;
 
-        cycles
+        t_cycles
     }
     
     /// Returns the next pending interrupt by priority

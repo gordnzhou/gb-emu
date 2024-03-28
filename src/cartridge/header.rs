@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Seek, SeekFrom};
 
 const HEADER_SIZE: usize = 0x50;
@@ -9,6 +11,7 @@ const LOGO_BYTES: usize = 0x30;
 const CGB_ENHANCED: u8 = 0x80;
 const CGB_ONLY: u8 = 0xC0;
 
+#[derive(Hash)]
 pub struct Header {
     pub nintendo_logo: [u8; LOGO_BYTES],
     pub manufacturer_code: String,
@@ -137,5 +140,11 @@ impl Header {
 
     pub fn cgb_compatible(&self) -> bool {
         self.cgb_flag & 0x80 !=  0
+    }
+
+    pub fn get_hash_string(&self) -> String {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish().to_string()
     }
 }

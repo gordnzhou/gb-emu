@@ -45,31 +45,32 @@ pub trait Mbc {
 pub fn make_mbc(rom_path: &str, header: &Header) -> Box<dyn Mbc> {
     let rom_banks = header.num_rom_banks();
     let ram_banks = header.num_ram_banks();
-    let title = header.title();
+    let mut file_name = header.title();
+    file_name.push_str(&header.get_hash_string());
 
     match header.cartridge_type() {
         0x00 => Box::new(NoMbc::new(rom_path)),
         0x01 => Box::new(Mbc1::new(rom_path, rom_banks)),
         0x02 => Box::new(Mbc1::new(rom_path, rom_banks).with_ram(ram_banks)),
-        0x03 => Box::new(Mbc1::new(rom_path, rom_banks).with_ram(ram_banks).with_battery(title)),
+        0x03 => Box::new(Mbc1::new(rom_path, rom_banks).with_ram(ram_banks).with_battery(file_name)),
         0x05 => Box::new(Mbc2::new_with_ram(rom_path, rom_banks)),
-        0x06 => Box::new(Mbc2::new_with_ram(rom_path, rom_banks).with_battery(title)),
+        0x06 => Box::new(Mbc2::new_with_ram(rom_path, rom_banks).with_battery(file_name)),
         0x08 => unimplemented!(),
         0x09 => unimplemented!(),
         0x0B => unimplemented!(),
         0x0C => unimplemented!(),
         0x0D => unimplemented!(),
-        0x0F => Box::new(Mbc3::new(rom_path, rom_banks).with_rtctimer().with_battery(title)),
-        0x10 => Box::new(Mbc3::new(rom_path, rom_banks).with_rtctimer().with_ram(ram_banks).with_battery(title)),
+        0x0F => Box::new(Mbc3::new(rom_path, rom_banks).with_rtctimer().with_battery(file_name)),
+        0x10 => Box::new(Mbc3::new(rom_path, rom_banks).with_rtctimer().with_ram(ram_banks).with_battery(file_name)),
         0x11 => Box::new(Mbc3::new(rom_path, rom_banks)),
         0x12 => Box::new(Mbc3::new(rom_path, rom_banks).with_ram(ram_banks)),
-        0x13 => Box::new(Mbc3::new(rom_path, rom_banks).with_ram(ram_banks).with_battery(title)),
+        0x13 => Box::new(Mbc3::new(rom_path, rom_banks).with_ram(ram_banks).with_battery(file_name)),
         0x19 => Box::new(Mbc5::new(rom_path, rom_banks)),
         0x1A => Box::new(Mbc5::new(rom_path, rom_banks).with_ram(ram_banks)),
-        0x1B => Box::new(Mbc5::new(rom_path, rom_banks).with_ram(ram_banks).with_battery(title)),
+        0x1B => Box::new(Mbc5::new(rom_path, rom_banks).with_ram(ram_banks).with_battery(file_name)),
         0x1C => Box::new(Mbc5::new(rom_path, rom_banks).with_rumble()),
         0x1D => Box::new(Mbc5::new(rom_path, rom_banks).with_rumble().with_ram(ram_banks)),
-        0x1E => Box::new(Mbc5::new(rom_path, rom_banks).with_rumble().with_ram(ram_banks).with_battery(title)),
+        0x1E => Box::new(Mbc5::new(rom_path, rom_banks).with_rumble().with_ram(ram_banks).with_battery(file_name)),
         0x20 => unimplemented!(),
         0x22 => unimplemented!(),
         0xFC => unimplemented!(),

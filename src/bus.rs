@@ -27,8 +27,14 @@ const EMPTY_END: usize = 0xFEFF;
 const HRAM_START: usize = 0xFF80;
 const HRAM_END: usize = 0xFFFE;
 
-const DMA_CYCLES: u16 = 160;
+const DMA_M_CYCLES: u16 = 160;
 const HDMA_BLOCK_SIZE: usize = 0x10;
+
+enum HDMAMode {
+    GDMA,
+    HDMA,
+    None,
+}
 
 pub struct Bus {
     model: GBModel,
@@ -57,7 +63,7 @@ pub struct Bus {
     rp: u8,
     svbk: u8,
     hdma_bytes: usize,
-    hdma_running: bool,
+    hdma_mode: HDMAMode,
     hdma_length: u8,
 }
 
@@ -78,7 +84,7 @@ impl Bus {
             interrupt_enable: 0,
             interrupt_flag: 0xE0,
             dma_start: 0,
-            dma_ticks: DMA_CYCLES,
+            dma_ticks: DMA_M_CYCLES,
 
             key1: 0,
             hdma1: 0,
@@ -89,7 +95,7 @@ impl Bus {
             rp: 0,
             svbk: 0,
             hdma_bytes: 0,
-            hdma_running: false,
+            hdma_mode: HDMAMode::None,
             hdma_length: 0,
         }
     }
@@ -102,11 +108,11 @@ impl Bus {
     /// Steps through components that require M-cycle level accuracy;
     /// this should also be called AFTER and BETWEEN (right after reads/writes) instructions.
     /// NOTE: This stepping is affected by double speed mode on CGB
-    pub fn partial_step(&mut self, cycles: u8) {
-        self.step_oam_dma(cycles);
+    pub fn partial_step(&mut self, t_cycles: u32) {
+        self.step_oam_dma(t_cycles / 4);
 
         let old_div = self.timer.div;
-        if self.timer.step(cycles) {
+        if self.timer.step(t_cycles) {
             self.request_interrupt(Interrupt::Timer)
         }
         
@@ -123,14 +129,20 @@ impl Bus {
 
     /// Steps through other components to be done at the END OF EACH INTSTRUCTION.
     /// Updates interrupt flags accordingly.
-    pub fn step(&mut self, cycles: u8) {
-        self.apu.step(cycles as u32);
-        
-        self.ppu.step(cycles);
+    pub fn step(&mut self, t_cycles: u32) {
+        let mut t_cycles = t_cycles;
+
+        if self.double_speed {
+            t_cycles /= 2;
+        }
 
         if self.is_cgb() {
-            self.step_vram_hdma();
+            t_cycles += self.step_vram_dma();
         }
+
+        self.apu.step(t_cycles);
+        
+        self.ppu.step(t_cycles);
 
         if self.ppu.entered_vblank {
             self.request_interrupt(Interrupt::VBlank);
@@ -265,55 +277,77 @@ impl Bus {
         self.hdma_bytes = 0;
                
         if byte & 0x80 == 0 {
-            if self.hdma_running {
-                self.hdma_running = false;
+            if matches!(self.hdma_mode, HDMAMode::HDMA) {
+                self.hdma_mode = HDMAMode::None;
                 return;
             }
-
-            for _ in 0..self.hdma_transfer_blocks() {
-                self.transfer_block_to_vram();
-            }
-
-            self.hdma_running = false;
-            self.hdma_length = 0x7F;
+            self.hdma_mode = HDMAMode::GDMA;
         } else {
-            self.hdma_running = true;
+            self.hdma_mode = HDMAMode::HDMA;
         }
     }
 
     /// Steps through a DMA transfer from 0xNN00-0xNN9F to 0xFE00-0xFE9F (OAM) 
     /// which runs for 160 M-cycles in total.
-    fn step_oam_dma(&mut self, cycles: u8) {
-        let mut cycles = cycles;
-        while cycles > 0 && self.dma_ticks < DMA_CYCLES {
+    fn step_oam_dma(&mut self, m_cycles: u32) {
+        let mut m_cycles = m_cycles;
+        while m_cycles > 0 && self.dma_ticks < DMA_M_CYCLES {
 
             // One byte transferred per M cycle during OAM DMA.\
             let dma_index = self.dma_ticks;
             let byte = self.read_byte(self.dma_start | dma_index);
             self.ppu.write_oam(0xFE00 | dma_index as usize, byte);
 
-            cycles -=1;
+            m_cycles -= 1;
             self.dma_ticks += 1;
         }
     }
 
-    /// If HDMA is running, transfers 0x10 bytes to VRAM at each HBlank.
-    fn step_vram_hdma(&mut self) {
-        if !self.ppu.entered_hblank() || !self.hdma_running {
-            return;
+    /// (CGB Only) Steps through HDMA, returning the number of T-Cycles taken.
+    fn step_vram_dma(&mut self) -> u32 {
+        if !self.is_cgb() {
+            return 0;
         }
 
-        self.transfer_block_to_vram();
-        self.hdma_length -= 1;
-
-        if self.hdma_bytes == self.hdma_transfer_blocks() * HDMA_BLOCK_SIZE {
-            self.hdma_running = false;
-            self.hdma_length = 0x7F;
+        match self.hdma_mode {
+            HDMAMode::GDMA => self.step_vram_gdma(),
+            HDMAMode::HDMA => self.step_vram_hdma(),
+            HDMAMode::None => 0
         }
     }
 
+    fn step_vram_gdma(&mut self) -> u32 {
+        let mut t_cycles = 0;
+        for _ in 0..self.hdma_transfer_blocks() {
+            t_cycles += self.transfer_block_to_vram();
+        }
+
+        self.hdma_length = 0x7F;
+        self.hdma_mode = HDMAMode::None;
+        
+        t_cycles
+    }
+
+    /// If HDMA is running, transfers a block of bytes to VRAM at each HBlank.
+    fn step_vram_hdma(&mut self) -> u32 {
+        if !self.ppu.entered_hblank() {
+            return 0;
+        }
+
+        let t_cycles = self.transfer_block_to_vram();
+
+        if self.hdma_bytes == self.hdma_transfer_blocks() * HDMA_BLOCK_SIZE {
+            self.hdma_mode = HDMAMode::None;
+            self.hdma_length = 0x7F;
+        } else {
+            self.hdma_length -= 1;
+        }
+
+        t_cycles
+    }
+
     fn read_hdma5(&self) -> u8 {
-        let status = if !self.hdma_running {
+        let status = if !matches!(self.hdma_mode, HDMAMode::HDMA) {
             0x80
         } else {
             0x00
@@ -321,7 +355,8 @@ impl Bus {
         status | self.hdma_length
     }
 
-    fn transfer_block_to_vram(&mut self) {
+    /// Does a DMA transfer of a block (0x10) of bytes to VRAM, returning the number of T-cycles taken.
+    fn transfer_block_to_vram(&mut self) -> u32 {
         let source_start = self.hdma_source_start();
         let dest_start = self.hdma_dest_start();
 
@@ -330,6 +365,8 @@ impl Bus {
             self.ppu.write_vram(dest_start + self.hdma_bytes + i, byte);
         }
         self.hdma_bytes += HDMA_BLOCK_SIZE;
+
+        return 32;
     }
 
     fn hdma_transfer_blocks(&self) -> usize {
@@ -355,7 +392,8 @@ impl Bus {
         }
     }
 
-    /// If speed switch has been armed, unarms it, switches speed and returns true.
+    /// If speed switch has been armed, unarms it, switches speed and returns true;
+    /// otherwise nothing happens and returns false.
     pub fn speed_switch(&mut self) -> bool {
         if self.is_cgb() && self.key1 & 1 != 0 {
             self.key1 &= 0xFE;

@@ -20,13 +20,11 @@ pub const BYTES_PER_PIXEL: usize = 4;
 pub const LCD_BYTE_WIDTH: usize = BYTES_PER_PIXEL * LCD_WIDTH;
 
 // DETERMINES GAME SPEED
-pub const DOT_HZ: u32 = 1 << 22;
+pub const T_CYCLE_HZ: u32 = 1 << 22;
+pub const M_CYCLE_HZ: u32 = T_CYCLE_HZ >> 2;
 
-pub const CYCLE_HZ: u32 = DOT_HZ >> 2;
-
-// 1 dot = 2^22 Hz = 1/4 M-cycle = 238.4... ns
-pub const DOT_DURATION_NS: f32 = 1e9 / DOT_HZ as f32;
-const CYCLE_DURATION_NS: f32 = DOT_DURATION_NS * 4.0;
+// 1 T Cycle = 2^22 Hz = 1/4 M-cycle = 238.4... ns
+pub const T_CYCLE_DURATION_NS: u64 = (1e9 as u32 / T_CYCLE_HZ) as u64;
 
 pub struct Emulator {
     event_pump: EventPump,
@@ -100,10 +98,10 @@ impl Emulator {
         // NOTE: cycle timings seem to be controlled by APU audio callback 
         while dur_ns < total_dur_ns {
             self.cpu.bus.joypad.step(self.key_status);
-            let cycles = self.cpu.step();
+            let t_cycles = self.cpu.step() as u64;
             self.next_frame(&mut texture, rect);
 
-            let cpu_duration_ns = (cycles as f32 * CYCLE_DURATION_NS) as u64;
+            let cpu_duration_ns = t_cycles * T_CYCLE_DURATION_NS;
             dur_ns += cpu_duration_ns;
         } 
     }

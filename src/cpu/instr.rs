@@ -4,7 +4,7 @@ use super::{Cpu, GBModel, Interrupt::{self, *}};
 impl Cpu {
     /// Execute the next instruction and steps through SOME parts bus (see partial_step in bus);
     /// returns TOTAL number of M-cycles taken.
-    pub(super) fn execute_next_instruction(&mut self) -> u8 {
+    pub(super) fn execute_next_instruction(&mut self) -> u32 {
         let opcode = self.bus_read_byte(self.PC());
 
         if self.halt_bug {
@@ -13,7 +13,7 @@ impl Cpu {
             self.inc_PC(1);
         }
 
-        let cycles = match opcode {
+        let m_cycles = match opcode {
             0x00 => self.nop(),
             0x01 => self.ld_r16_n16("BC"),
             0x02 => self.ld_r16_a("BC"),
@@ -288,11 +288,11 @@ impl Cpu {
             _ => { 1 },
         };
 
-        cycles
+        m_cycles as u32
     }
 
     /// does a JUMP to interrupt vector and resets IF bit, returning M-cycles taken.
-    pub(super) fn handle_interrupt(&mut self, interrupt: Interrupt) -> u8 {
+    pub(super) fn handle_interrupt(&mut self, interrupt: Interrupt) -> u32 {
         self.push_stack(self.PC());
 
         let bit = match interrupt {
@@ -1387,15 +1387,15 @@ impl Cpu {
 
     fn bus_read_byte(&mut self, addr: u16) -> u8 {
         let byte = self.bus.read_byte(addr);
-        self.bus.partial_step(1);
-        self.cycles_so_far += 1;
+        self.bus.partial_step(4);
+        self.t_cycles_so_far += 4;
         byte
     }
 
     fn bus_write_byte(&mut self, addr: u16, byte: u8) {
         self.bus.write_byte(addr, byte);
-        self.bus.partial_step(1);
-        self.cycles_so_far += 1;
+        self.bus.partial_step(4);
+        self.t_cycles_so_far += 4;
     }
 
     fn n16(&mut self) -> u16 {

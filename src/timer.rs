@@ -1,5 +1,5 @@
-// div is incremented every 256 dots / 64 M-cycles 
-const CYCLES_PER_DIV_INC: u32 = 64;
+// div is incremented every 256 T-cycles / 64 M-cycles 
+const T_CYCLES_PER_DIV_INC: u32 = 256;
 
 pub struct Timer {
     pub div: u8,
@@ -21,18 +21,18 @@ impl Timer {
             tma: 0,
             tac: 0,
 
-            div_stepper: Stepper::new(0, CYCLES_PER_DIV_INC),
-            tima_stepper: Stepper::new(0, 256),
+            div_stepper: Stepper::new(0, T_CYCLES_PER_DIV_INC),
+            tima_stepper: Stepper::new(0, 1024),
 
             next_tma: -1,
         }
     }
 
-    /// Ticks timer registers over the given period (in cycles); returns true if TIMA overflowed
-    pub fn step(&mut self, cycles: u8) -> bool {
-        let cycles = cycles as u32;
+    /// Ticks timer registers over the given period (in t cycles); returns true if TIMA overflowed
+    pub fn step(&mut self, t_cycles: u32) -> bool {
+        let t_cycles = t_cycles;
 
-        let steps = self.div_stepper.step(cycles);
+        let steps = self.div_stepper.step(t_cycles);
 
         // DIV increments at most once per CPU instruction
         if steps > 0 {
@@ -40,24 +40,24 @@ impl Timer {
         }
 
         if self.tac & 0x04 != 0 {
-            self.step_tima(cycles)
+            self.step_tima(t_cycles)
         } else {
             false
         }
     }
 
-    fn step_tima(&mut self, cycles: u32) -> bool {
+    fn step_tima(&mut self, t_cycles: u32) -> bool {
         self.tima_stepper.set_period(match self.tac & 0x03 {
-            0 => 256,
-            1 => 4,
-            2 => 16,
-            3 => 64,
+            0 => 1024,
+            1 => 16,
+            2 => 64,
+            3 => 256,
             _ => unreachable!(),
         });
 
         let mut tima_overflow = false;
 
-        let steps = self.tima_stepper.step(cycles);
+        let steps = self.tima_stepper.step(t_cycles);
         for _ in 0..steps {
             self.tima = self.tima.wrapping_add(1);
 

@@ -15,7 +15,7 @@ use cpu::{mooneye_fail_check, mooneye_pass_check, Cpu, GBModel};
 use emulator::Emulator;
 use config::*;
 
-const ROM_PATH: &str = "roms/zeldaoracle.gbc";
+const ROM_PATH: &str = "roms/tests/cgb-acid2.gbc";
 
 fn main() -> Result<(), String> {
 

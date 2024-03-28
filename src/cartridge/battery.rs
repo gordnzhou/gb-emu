@@ -11,8 +11,8 @@ pub struct Battery {
 }
 
 impl Battery {
-    pub fn new(header_hash: String) -> Self {
-        let save_folder: String = format!("{}/{}", SAVE_PATH, header_hash);
+    pub fn new(file_name: String) -> Self {
+        let save_folder: String = format!("{}/{}", SAVE_PATH, file_name);
         let rom_file_location = format!("{}/ram", save_folder);
         let rtc_file_location = format!("{}/rtc", save_folder);
 

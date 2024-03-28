@@ -10,7 +10,7 @@ use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::{AudioSubsystem, Sdl};
 
 use crate::cpu::GBModel;
-use crate::emulator::CYCLE_HZ;
+use crate::emulator::M_CYCLE_HZ;
 use crate::{AUDIO_SAMPLES, MASTER_VOLUME, SAMPLING_RATE_HZ};
 use self::channels::*;
 use envelope::Envelope;
@@ -105,12 +105,13 @@ impl Apu {
         self.noise .frame_sequencer_step();
     }
 
-    pub fn step(&mut self, cycles: u32) {
+    pub fn step(&mut self, t_cycles: u32) {
         if !self.apu_on {
             return;
         }
-        
-        for _ in 0..cycles {
+
+        let m_cycles = t_cycles / 4;
+        for _ in 0..m_cycles {
             let pulse1_sample = self.pulse1.make_sample();
             let pulse2_sample = self.pulse2.make_sample();
             let wave_sample = self.wave.make_sample();
@@ -121,7 +122,8 @@ impl Apu {
                 self.pcm34 = (noise_sample << 4) | wave_sample; 
             }
             
-            if self.sample_gather == (CYCLE_HZ / SAMPLING_RATE_HZ) {
+            if self.sample_gather == (M_CYCLE_HZ / SAMPLING_RATE_HZ) {
+                self.sample_gather = 0;
                 self.push_samples_to_buffer(pulse1_sample, pulse2_sample, wave_sample, noise_sample)
             }
             self.sample_gather += 1;
@@ -135,8 +137,6 @@ impl Apu {
         let pulse2_sample = Apu::to_analog(pulse2_sample);
         let wave_sample = Apu::to_analog(wave_sample);
         let noise_sample = Apu::to_analog(noise_sample);
-
-        self.sample_gather = 0;
 
         let mut right_sample = 0.0;
         if self.nr51 & 0x01 != 0 { right_sample += pulse1_sample }
