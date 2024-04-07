@@ -2,7 +2,7 @@
 const T_CYCLES_PER_DIV_INC: u32 = 256;
 
 pub struct Timer {
-    pub div: u8,
+    div: u8,
     tima: u8,
     tma: u8,
     tac: u8,
@@ -93,6 +93,14 @@ impl Timer {
             0xFF07 => self.tac = byte,
             _ => unreachable!()
         };
+    }
+
+    pub fn read_div(&self) -> u8 {
+        self.div
+    }
+
+    pub fn reset_div(&mut self) {
+        self.div = 0;
     }
 }
 

@@ -3,15 +3,9 @@ mod envelope;
 mod length_counter;
 mod sweep;
 
-use std::sync::mpsc::{Receiver, SyncSender};
-use std::time::Duration;
-
-use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
-use sdl2::{AudioSubsystem, Sdl};
-
 use crate::cpu::GBModel;
 use crate::emulator::M_CYCLE_HZ;
-use crate::{AUDIO_SAMPLES, MASTER_VOLUME, SAMPLING_RATE_HZ};
+use crate::{AUDIO_SAMPLES, SAMPLING_RATE_HZ};
 use self::channels::*;
 use envelope::Envelope;
 use length_counter::LengthCounter;
@@ -25,9 +19,6 @@ const WAVE_RAM_END: usize = 0xFF3F;
 pub struct Apu {
     model: GBModel,
     apu_on: bool,
-    audio_tx: Option<SyncSender<[[f32; 2]; AUDIO_SAMPLES]>>,
-    _audio_subsystem: Option<AudioSubsystem>,
-    _audio_device: Option<AudioDevice<Callback>>,
     pulse1: Pulse,
     pulse2: Pulse,
     wave: Wave,
@@ -45,40 +36,10 @@ pub struct Apu {
 }
 
 impl Apu {
-    pub fn new(sdl: Option<Sdl>, model: GBModel) -> Self {
-        let mut audio_tx = None;
-        let mut _audio_subsystem = None;
-        let mut _audio_device = None;
-
-        match sdl {
-            Some(sdl_context) => {
-                let (_audio_tx, audio_rx) = std::sync::mpsc::sync_channel(4);
-                audio_tx = Some(_audio_tx);
-
-                let desired_spec = AudioSpecDesired {
-                    freq: Some(SAMPLING_RATE_HZ as i32),
-                    channels: Some(2),
-                    samples: Some(AUDIO_SAMPLES as u16),
-                };
-
-                let audio_subsystem = sdl_context.audio().unwrap();
-                let audio_device = audio_subsystem.open_playback(None, &desired_spec, |_spec| {
-                    Callback { audio_rx, prev_sample: [0.0; 2] }
-                }).unwrap();
-                audio_device.resume();
-
-                _audio_device = Some(audio_device);
-                _audio_subsystem = Some(audio_subsystem);
-            }
-            None => {}
-        }
-
+    pub fn new(model: GBModel) -> Self {
         Apu { 
             model,
             apu_on: true,
-            audio_tx,
-            _audio_device,
-            _audio_subsystem,
             pulse1: Pulse::new(true),
             pulse2: Pulse::new(false),
             wave: Wave::new(model),
@@ -133,11 +94,13 @@ impl Apu {
                 self.sample_gather += 1;
             }
         }
-
-        self.push_to_callback();
     }
 
     fn push_samples_to_buffer(&mut self, pulse1_sample: u8, pulse2_sample: u8, wave_sample: u8, noise_sample: u8) {
+        if self.buffer_index >= AUDIO_SAMPLES {
+            self.buffer_index = 0;
+        }
+
         let pulse1_sample = Apu::to_analog(pulse1_sample);
         let pulse2_sample = Apu::to_analog(pulse2_sample);
         let wave_sample = Apu::to_analog(wave_sample);
@@ -164,26 +127,20 @@ impl Apu {
         self.buffer_index += 1;
     }
 
-    fn push_to_callback(&mut self) {
+    pub fn get_audio_output(&mut self) -> Option<[[f32; 2]; AUDIO_SAMPLES]> {
         if self.buffer_index < AUDIO_SAMPLES {
-            return;
+            return None;
         }
 
-        match &mut self.audio_tx {
-            Some(audio_tx) => {
-                let mut res = [[0.0; 2]; AUDIO_SAMPLES];
-                res.copy_from_slice(&self.audio_buffer[0..AUDIO_SAMPLES]);
-                for i in AUDIO_SAMPLES..self.buffer_index {
-                    self.audio_buffer[i - AUDIO_SAMPLES] = self.audio_buffer[i];
-                }
-                self.buffer_index -= AUDIO_SAMPLES;
+        let mut res = [[0.0; 2]; AUDIO_SAMPLES];
+        res.copy_from_slice(&self.audio_buffer[0..AUDIO_SAMPLES]);
 
-                audio_tx.send(res).unwrap();
-            }
-            None => {
-                self.buffer_index = 0;
-            }
+        for i in AUDIO_SAMPLES..self.buffer_index {
+            self.audio_buffer[i - AUDIO_SAMPLES] = self.audio_buffer[i];
         }
+        self.buffer_index -= AUDIO_SAMPLES;
+
+        Some(res)
     }
 
     pub fn to_analog(sample: u8) -> f32 {
@@ -271,37 +228,6 @@ impl Apu {
 
 }
 
-struct Callback {
-    audio_rx: Receiver<[[f32; 2]; AUDIO_SAMPLES]>,
-    prev_sample: [f32; 2],
-}
-
-impl AudioCallback for Callback {
-    type Channel = f32;
-
-    fn callback(&mut self, stream: &mut [f32]) {
-        match self.audio_rx.recv_timeout(Duration::from_millis(30)) {
-            Ok(buffer) => {
-                for i in 0..buffer.len() {
-                    stream[i * 2] = buffer[i][0];
-                    stream[i * 2 + 1] = buffer[i][1];
-                }
-            
-                self.prev_sample = buffer[buffer.len() - 1];
-            }
-            Err(_) => {
-                for i in 0..stream.len() {
-                    stream[i] = self.prev_sample[i % 2];
-                }
-            }
-        }
-
-        for i in 0..stream.len() {
-            stream[i] *= MASTER_VOLUME
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{bus::{RAM_END, RAM_START}, cartridge::Cartridge, cpu::Cpu};
@@ -331,7 +257,7 @@ mod tests {
                 let mut output = String::new();
 
                 for i in RAM_START..RAM_END {
-                    let byte = cpu.bus.read_byte(i as u16);
+                    let byte = cpu.read_byte(i as u16);
                     if byte != 0 {
                         output.push(char::from(byte));
                     }
@@ -371,7 +297,7 @@ mod tests {
                 let mut output = String::new();
 
                 for i in RAM_START..RAM_END {
-                    let byte = cpu.bus.read_byte(i as u16);
+                    let byte = cpu.read_byte(i as u16);
                     if byte != 0 {
                         output.push(char::from(byte));
                     }

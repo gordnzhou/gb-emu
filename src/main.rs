@@ -27,7 +27,7 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-const TIMEOUT: u64 = 1 << 32;
+const TEST_TIMEOUT: u64 = 1 << 32;
 
 #[allow(dead_code)]
 fn test_blargg_rom(test_rom_path: &str, model: GBModel) {
@@ -35,12 +35,12 @@ fn test_blargg_rom(test_rom_path: &str, model: GBModel) {
     let mut cpu = Cpu::new(cartridge, model);
 
     let mut cycles: u64 = 0;
-    while cycles < TIMEOUT {
+    while cycles < TEST_TIMEOUT {
         cycles += cpu.step() as u64;
 
-        if cpu.bus.serial_output.contains("Passed") {
+        if cpu.get_serial_output().contains("Passed") {
             break;
-        } else if cpu.bus.serial_output.contains("Failed") {
+        } else if cpu.get_serial_output().contains("Failed") {
             panic!("cpu_instr test ROM failed");
         }
     } 
@@ -52,7 +52,7 @@ fn test_mooneye_rom(test_rom_path: &str, model: GBModel) {
     let mut cpu = Cpu::new(cartridge, model);
 
     let mut cycles: u64 = 0;
-    while cycles < TIMEOUT {
+    while cycles < TEST_TIMEOUT {
         cycles += cpu.step() as u64;
 
         if mooneye_fail_check(&cpu) {

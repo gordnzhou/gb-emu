@@ -1,11 +1,11 @@
-use sdl2::Sdl;
-
+use crate::emulator::{LCD_BYTE_WIDTH, LCD_HEIGHT};
 use crate::joypad::Joypad;
 use crate::apu::Apu;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
 use crate::cartridge::Cartridge;
 use crate::cpu::{GBModel, Interrupt};
+use crate::AUDIO_SAMPLES;
 
 const WRAM_SIZE: usize = 0x1000;
 const HRAM_SIZE: usize = 0x0080;
@@ -39,12 +39,12 @@ enum HDMAMode {
 pub struct Bus {
     model: GBModel,
     double_speed: bool,
-    pub serial_output: String,
+    serial_output: String,
 
-    pub cartridge: Cartridge,
-    pub joypad: Joypad,
-    pub apu: Apu,
-    pub ppu: Ppu,
+    cartridge: Cartridge,
+    joypad: Joypad,
+    apu: Apu,
+    ppu: Ppu,
     wram: [[u8; WRAM_SIZE]; 8],
     timer: Timer, 
     hram: [u8; HRAM_SIZE],
@@ -76,7 +76,7 @@ impl Bus {
 
             cartridge,
             joypad: Joypad::new(),
-            apu: Apu::new(None, model),
+            apu: Apu::new(model),
             ppu: Ppu::new(model),
             timer: Timer::new(),
             wram: [[0; WRAM_SIZE]; 8],
@@ -100,28 +100,23 @@ impl Bus {
         }
     }
 
-    pub fn with_audio(mut self, sdl: Sdl) -> Self {
-        self.apu = Apu::new(Some(sdl), self.model);
-        self
-    }
-
     /// Steps through components that require M-cycle level accuracy;
     /// this should also be called AFTER and BETWEEN (right after reads/writes) instructions.
     /// NOTE: This stepping is affected by double speed mode on CGB
     pub fn partial_step(&mut self, t_cycles: u32) {
         self.step_oam_dma(t_cycles / 4);
 
-        let old_div = self.timer.div;
+        let old_div = self.timer.read_div();
         if self.timer.step(t_cycles) {
             self.request_interrupt(Interrupt::Timer)
         }
         
         if self.double_speed {
-            if old_div & 0x20 != 0 && self.timer.div & 0x20 == 0 {
+            if old_div & 0x20 != 0 && self.timer.read_div() & 0x20 == 0 {
                 self.apu.frame_sequencer_step();
             }
         } else {
-            if old_div & 0x10 != 0 && self.timer.div & 0x10 == 0 {
+            if old_div & 0x10 != 0 && self.timer.read_div() & 0x10 == 0 {
                 self.apu.frame_sequencer_step();
             }
         }
@@ -142,13 +137,13 @@ impl Bus {
         
         self.ppu.step(t_cycles);
 
-        if self.ppu.entered_vblank {
+        if self.ppu.entered_vblank() {
             self.request_interrupt(Interrupt::VBlank);
         }
-        if self.ppu.stat_triggered {
+        if self.ppu.stat_triggered() {
             self.request_interrupt(Interrupt::Stat)
         }
-        if self.joypad.interrupt {
+        if self.joypad.interrupt_triggered() {
             self.request_interrupt(Interrupt::Joypad)
         }
     }
@@ -397,7 +392,7 @@ impl Bus {
             self.key1 &= 0xFE;
             self.key1 = !(self.key1 & 0x80) | (self.key1 & 0x7F);
             self.double_speed = !self.double_speed;
-            self.timer.div = 0;
+            self.timer.reset_div();
             return true;
         } 
         false
@@ -405,5 +400,29 @@ impl Bus {
 
     fn is_cgb(&self) -> bool {
         matches!(self.model, GBModel::CGB)
+    }
+
+    pub fn get_audio_output(&mut self) -> Option<[[f32; 2]; AUDIO_SAMPLES]> {
+        self.apu.get_audio_output()
+    }
+
+    pub fn get_display_output(&mut self) -> Option<&[u8; LCD_BYTE_WIDTH * LCD_HEIGHT]> {
+        self.ppu.get_display_output()
+    }
+
+    pub fn entered_hblank(&self) -> bool {
+        self.ppu.entered_hblank()
+    }
+
+    pub fn update_joypad(&mut self, status: u8) {
+        self.joypad.update(status)
+    }
+
+    pub fn get_serial_output(&self) -> &str {
+        &self.serial_output
+    }
+
+    pub fn save_mbc_state(&mut self) {
+        self.cartridge.save_mbc_state()
     }
 }

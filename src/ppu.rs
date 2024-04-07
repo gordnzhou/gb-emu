@@ -31,6 +31,9 @@ enum Mode {
 
 pub struct Ppu {
     model: GBModel,
+    frame_buffer: [u8; LCD_BYTE_WIDTH * LCD_HEIGHT],
+    stat_triggered: bool,
+    entered_vblank: bool,
     tile_data0: [[u8; TILE_SIZE]; TILE_ENTRIES],
     tile_map0: [u8; TILE_MAP_SIZE],
     tile_map1: [u8; TILE_MAP_SIZE],
@@ -47,11 +50,6 @@ pub struct Ppu {
     obp1: u8,
     wy: u8,
     wx: u8,
-
-    // frame buffer representing the LCD screen
-    pub frame_buffer: [u8; LCD_BYTE_WIDTH * LCD_HEIGHT],
-    pub stat_triggered: bool,
-    pub entered_vblank: bool,
 
     stat_line: bool,
     mode: Mode,
@@ -583,11 +581,6 @@ impl Ppu {
         self.dma = byte;
     }
 
-    /// signals if PPU has just entered HBlank
-    pub fn entered_hblank(&mut self) -> bool {
-        self.entered_hblank
-    }
-
     fn calc_mode_3_dots(&self) -> u32 {
         let mut res = MODE_3_MIN_DOTS + (self.scx % 8) as u32;
 
@@ -660,6 +653,26 @@ impl Ppu {
     fn is_cgb(&mut self) -> bool {
         matches!(self.model, GBModel::CGB)
     }
+
+    pub fn get_display_output(&mut self) -> Option<&[u8; LCD_BYTE_WIDTH * LCD_HEIGHT]> {
+        if !self.entered_vblank {
+            return None;
+        }
+        self.entered_vblank = false;
+        Some(&self.frame_buffer)
+    }
+
+    pub fn stat_triggered(&self) -> bool {
+        self.stat_triggered
+    }
+
+    pub fn entered_vblank(&self) -> bool {
+        self.entered_vblank
+    }
+
+    pub fn entered_hblank(&self) -> bool {
+        self.entered_hblank
+    }
 }
 
 struct OAMEntry {
@@ -727,8 +740,12 @@ mod tests {
         while cycles < 5000000 {
             cycles += cpu.step() as u32;
         } 
-        
-        let hash = fnv1a(&cpu.bus.ppu.frame_buffer);
+
+        let hash = match cpu.get_display_output() {
+            Some(frame_buffer) => fnv1a(frame_buffer),
+            None => 0
+        };
+
         assert!(hash == DMG_CHECKHASH, "hash mismatch: got {} but expected {}", hash, DMG_CHECKHASH);
     }
 
@@ -741,7 +758,11 @@ mod tests {
             cycles += cpu.step() as u32;
         } 
         
-        let hash = fnv1a(&cpu.bus.ppu.frame_buffer);
+        let hash = match cpu.get_display_output() {
+            Some(frame_buffer) => fnv1a(frame_buffer),
+            None => 0
+        };
+
         assert!(hash == CGB_CHECKHASH, "hash mismatch: got {} but expected {}", hash, CGB_CHECKHASH);
     }
 

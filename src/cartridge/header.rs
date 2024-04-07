@@ -13,15 +13,15 @@ const CGB_ONLY: u8 = 0xC0;
 
 #[derive(Hash)]
 pub struct Header {
-    pub nintendo_logo: [u8; LOGO_BYTES],
-    pub manufacturer_code: String,
-    pub cgb_flag: u8,
-    pub licensee_code: u16,
-    pub sgb_flag: u8,
-    pub destination_code: u8, 
-    pub version_number: u8,
-    pub header_checksum: u8, 
-    pub global_checksum: u16,
+    nintendo_logo: [u8; LOGO_BYTES],
+    manufacturer_code: String,
+    cgb_flag: u8,
+    licensee_code: u16,
+    sgb_flag: u8,
+    destination_code: u8, 
+    version_number: u8,
+    header_checksum: u8, 
+    global_checksum: u16,
 
     title: String,
     cartridge_type: u8,

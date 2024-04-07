@@ -1,4 +1,8 @@
-use sdl2::Sdl;
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::time::Duration;
+
+use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
+use sdl2::{AudioSubsystem, Sdl};
 use sdl2::video::Window;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture};
@@ -9,7 +13,7 @@ use sdl2::EventPump;
 
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, GBModel};
-use crate::{KEYMAPPINGS, SCREEN_SCALE};
+use crate::{AUDIO_SAMPLES, KEYMAPPINGS, MASTER_VOLUME, SAMPLING_RATE_HZ, SCREEN_SCALE};
 
 pub const LCD_WIDTH: usize= 160;
 pub const LCD_HEIGHT: usize = 144;
@@ -31,6 +35,9 @@ pub struct Emulator {
     canvas: Canvas<Window>,
     key_status: u8,
     cpu: Cpu,
+    _audio_subsystem: AudioSubsystem,
+    _audio_device: AudioDevice<Callback>,
+    audio_tx: SyncSender<[[f32; 2]; AUDIO_SAMPLES]>
 }
 
 impl Emulator {
@@ -41,6 +48,18 @@ impl Emulator {
         let window_title = &cartridge.get_title();
         let canvas = Emulator::build_canvas(&sdl_context, SCREEN_SCALE as u32, window_title)?;
         let event_pump = sdl_context.event_pump()?;
+
+        let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel(4);
+        let desired_spec = AudioSpecDesired {
+            freq: Some(SAMPLING_RATE_HZ as i32),
+            channels: Some(2),
+            samples: Some(AUDIO_SAMPLES as u16),
+        };
+        let _audio_subsystem = sdl_context.audio()?;
+        let _audio_device = _audio_subsystem.open_playback(None, &desired_spec, |_spec| {
+            Callback { audio_rx, prev_sample: [0.0; 2] }
+        }).unwrap();
+        _audio_device.resume();
 
         let model = if cartridge.cgb_compatible() {
             GBModel::CGB
@@ -53,7 +72,10 @@ impl Emulator {
             event_pump,
             canvas,
             key_status: 0xFF,
-            cpu: Cpu::new(cartridge, model).with_audio(sdl_context),
+            cpu: Cpu::new(cartridge, model),
+            _audio_device,
+            _audio_subsystem,
+            audio_tx,
         })
     }
 
@@ -97,35 +119,39 @@ impl Emulator {
 
         // NOTE: cycle timings seem to be controlled by APU audio callback 
         while dur_ns < total_dur_ns {
-            self.cpu.bus.joypad.step(self.key_status);
+            self.cpu.update_joypad(self.key_status);
             let t_cycles = self.cpu.step() as u64;
-            self.next_frame(&mut texture, rect);
-
+            self.step_emulator(&mut texture, rect);
             let cpu_duration_ns = t_cycles * T_CYCLE_DURATION_NS;
             dur_ns += cpu_duration_ns;
         } 
     }
 
-    /// Gets user input and updates screen, once every frame.
-    fn next_frame(&mut self, texture: &mut Texture, rect: Rect) {
-        if self.cpu.bus.ppu.entered_hblank() {
+    /// Steps SDL2 joypad input, texture display and audio callback
+    fn step_emulator(&mut self, texture: &mut Texture, rect: Rect) {
+        if self.cpu.entered_hblank() {
             match self.get_events() {
-                Ok(_) => self.cpu.bus.joypad.step(self.key_status),
+                Ok(_) => self.cpu.update_joypad(self.key_status),
                 Err(e) => panic!("{}", e)
             }
         }
-        
-        if !self.cpu.bus.ppu.entered_vblank {
-            return;
+
+        match self.cpu.get_audio_output() {
+            Some(audio_output) => self.audio_tx.send(audio_output).unwrap(),
+            None => {}
         }
-        self.cpu.bus.ppu.entered_vblank = false;
 
-        texture
-            .update(None, &self.cpu.bus.ppu.frame_buffer, LCD_BYTE_WIDTH)
-            .expect("texture update failed");
+        match self.cpu.get_display_output() {
+            Some(frame_buffer) => {
+                texture
+                    .update(None, frame_buffer, LCD_BYTE_WIDTH)
+                    .expect("texture update failed");
 
-        self.canvas.copy(&texture, None, rect).unwrap();
-        self.canvas.present();
+                self.canvas.copy(&texture, None, rect).unwrap();
+                self.canvas.present();
+            }
+            None => {}
+        };
     }
 
     fn get_events(&mut self) -> Result<(), &str> { 
@@ -133,7 +159,7 @@ impl Emulator {
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    self.cpu.bus.cartridge.save_mbc_state();
+                    self.cpu.save_mbc_state();
                     return Err("User Exited");
                 },
                 Event::KeyDown { keycode: Some(key), ..} => {   
@@ -155,5 +181,36 @@ impl Emulator {
         }
 
         Ok(())
+    }
+}
+
+struct Callback {
+    audio_rx: Receiver<[[f32; 2]; AUDIO_SAMPLES]>,
+    prev_sample: [f32; 2],
+}
+
+impl AudioCallback for Callback {
+    type Channel = f32;
+
+    fn callback(&mut self, stream: &mut [f32]) {
+        match self.audio_rx.recv_timeout(Duration::from_millis(30)) {
+            Ok(buffer) => {
+                for i in 0..buffer.len() {
+                    stream[i * 2] = buffer[i][0];
+                    stream[i * 2 + 1] = buffer[i][1];
+                }
+            
+                self.prev_sample = buffer[buffer.len() - 1];
+            }
+            Err(_) => {
+                for i in 0..stream.len() {
+                    stream[i] = self.prev_sample[i % 2];
+                }
+            }
+        }
+
+        for i in 0..stream.len() {
+            stream[i] *= MASTER_VOLUME
+        }
     }
 }

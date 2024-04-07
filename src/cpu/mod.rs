@@ -1,13 +1,13 @@
 mod instr;
 mod register;
 
-use sdl2::Sdl;
-
 use self::register::Register;
 use self::Interrupt::*;
 
 use crate::bus::Bus;
 use crate::cartridge::Cartridge;
+use crate::emulator::{LCD_BYTE_WIDTH, LCD_HEIGHT};
+use crate::AUDIO_SAMPLES;
 
 #[derive(Clone, Copy, Debug)]
 pub enum GBModel {
@@ -16,7 +16,7 @@ pub enum GBModel {
 }
 
 pub struct Cpu {
-    pub bus: Bus,
+    bus: Bus,
     model: GBModel,
 
     pub(self) scheduled_ei: bool,
@@ -55,8 +55,8 @@ impl Cpu {
             Cpu::make_cpu(0, 0, 00, 0, 0, 0, model, bus)
         } else {
             let mut bus = Bus::new(cartridge, model);
-            bus.ppu.write_io(0xFF40, 0x91);
-            bus.ppu.write_io(0xFF41, 0x81);
+            bus.write_byte(0xFF40, 0x91);
+            bus.write_byte(0xFF41, 0x81);
 
             match model {
                 GBModel::DMG => {
@@ -87,11 +87,6 @@ impl Cpu {
             sp: Register(sp),
             do_speed_switch: false,
         }
-    }
-
-    pub fn with_audio(mut self, sdl: Sdl) -> Self {
-        self.bus = self.bus.with_audio(sdl);
-        self
     }
 
     /// Steps through all parts of the emulator over the period
@@ -168,6 +163,35 @@ impl Cpu {
         }   
         
         None
+    }
+
+    pub fn get_audio_output(&mut self) -> Option<[[f32; 2]; AUDIO_SAMPLES]> {
+        self.bus.get_audio_output()
+    }
+
+    pub fn get_display_output(&mut self) -> Option<&[u8; LCD_BYTE_WIDTH * LCD_HEIGHT]> {
+        self.bus.get_display_output()
+    }
+
+    pub fn entered_hblank(&self) -> bool {
+        self.bus.entered_hblank()
+    }
+
+    pub fn update_joypad(&mut self, status: u8) {
+        self.bus.update_joypad(status)
+    }
+
+    pub fn get_serial_output(&self) -> &str {
+        self.bus.get_serial_output()
+    }
+
+    pub fn save_mbc_state(&mut self) {
+        self.bus.save_mbc_state()
+    }
+
+    #[allow(dead_code)]
+    pub fn read_byte(&self, addr: u16) -> u8 {
+        self.bus.read_byte(addr)
     }
 }
 

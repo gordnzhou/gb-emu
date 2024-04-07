@@ -2,7 +2,7 @@
 
 pub struct Joypad {
     joypad: u8,
-    pub interrupt: bool,
+    interrupt: bool,
 }
 
 impl Joypad {
@@ -26,7 +26,7 @@ impl Joypad {
     /// Update joypad register based on status, checking for any interrupts.
     /// status is in order of: START (msb), SELECT, B, A, DOWN, UP, LEFT, RIGHT (lsb).
     /// FALSE/0 = pressed and TRUE/1 = released.
-    pub fn step(&mut self, status: u8) {
+    pub fn update(&mut self, status: u8) {
         self.interrupt = false; 
 
         let upper_nibble = self.joypad & 0xF0;
@@ -55,5 +55,9 @@ impl Joypad {
 
     fn select_dpad(&self) -> bool {
         self.joypad & 0x10 == 0
+    }
+
+    pub fn interrupt_triggered(&self) -> bool {
+        self.interrupt
     }
 }
