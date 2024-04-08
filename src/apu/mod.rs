@@ -3,9 +3,9 @@ mod envelope;
 mod length_counter;
 mod sweep;
 
+use crate::config::{AUDIO_SAMPLES, SAMPLING_RATE_HZ};
+use crate::constants::M_CYCLE_HZ;
 use crate::cpu::GBModel;
-use crate::emulator::M_CYCLE_HZ;
-use crate::{AUDIO_SAMPLES, SAMPLING_RATE_HZ};
 use self::channels::*;
 use envelope::Envelope;
 use length_counter::LengthCounter;

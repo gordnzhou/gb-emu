@@ -6,8 +6,8 @@ use self::Interrupt::*;
 
 use crate::bus::Bus;
 use crate::cartridge::Cartridge;
-use crate::emulator::{LCD_BYTE_WIDTH, LCD_HEIGHT};
-use crate::AUDIO_SAMPLES;
+use crate::config::AUDIO_SAMPLES;
+use crate::constants::{LCD_BYTE_WIDTH, LCD_HEIGHT};
 
 #[derive(Clone, Copy, Debug)]
 pub enum GBModel {
@@ -181,6 +181,7 @@ impl Cpu {
         self.bus.update_joypad(status)
     }
 
+    #[allow(dead_code)]
     pub fn get_serial_output(&self) -> &str {
         self.bus.get_serial_output()
     }
@@ -197,7 +198,7 @@ impl Cpu {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_blargg_rom;
+    use super::test_helpers::test_blargg_rom;
 
     const CPU_INSTR: &str = "roms/tests/cpu_instrs.gb";
     const MEM_TIMING: &str = "roms/tests/mem_timing.gb";
@@ -219,20 +220,60 @@ mod tests {
     }
 }
 
-pub fn mooneye_pass_check(cpu: &Cpu) -> bool {
-    cpu.bc.hi() == 3 && 
-    cpu.bc.lo() == 5 && 
-    cpu.de.hi() == 8 && 
-    cpu.de.lo() == 13 &&
-    cpu.hl.hi() == 21 && 
-    cpu.hl.lo() == 34
-}  
+#[cfg(test)]
+pub mod test_helpers {
+    use crate::Cartridge;
+    use super::{Cpu, GBModel};
 
-pub fn mooneye_fail_check(cpu: &Cpu) -> bool {
-    cpu.bc.hi() == 0x42 && 
-    cpu.bc.lo() == 0x42 && 
-    cpu.de.hi() == 0x42 && 
-    cpu.de.lo() == 0x42 &&
-    cpu.hl.hi() == 0x42 && 
-    cpu.hl.lo() == 0x42
+    const TEST_TIMEOUT: u64 = 1 << 32;
+
+    fn mooneye_pass_check(cpu: &Cpu) -> bool {
+        cpu.bc.hi() == 3 && 
+        cpu.bc.lo() == 5 && 
+        cpu.de.hi() == 8 && 
+        cpu.de.lo() == 13 &&
+        cpu.hl.hi() == 21 && 
+        cpu.hl.lo() == 34
+    }  
+    
+    fn mooneye_fail_check(cpu: &Cpu) -> bool {
+        cpu.bc.hi() == 0x42 && 
+        cpu.bc.lo() == 0x42 && 
+        cpu.de.hi() == 0x42 && 
+        cpu.de.lo() == 0x42 &&
+        cpu.hl.hi() == 0x42 && 
+        cpu.hl.lo() == 0x42
+    }
+    
+    pub fn test_mooneye_rom(test_rom_path: &str, model: GBModel) {
+        let cartridge = Cartridge::from_file(test_rom_path, false);
+        let mut cpu = Cpu::new(cartridge, model);
+    
+        let mut cycles: u64 = 0;
+        while cycles < TEST_TIMEOUT {
+            cycles += cpu.step() as u64;
+    
+            if mooneye_fail_check(&cpu) {
+                panic!("Mooneye Test Failed: {}", test_rom_path)
+            } else if mooneye_pass_check(&cpu) {
+                return;
+            }
+        } 
+    }
+    
+    pub fn test_blargg_rom(test_rom_path: &str, model: GBModel) {
+        let cartridge = Cartridge::from_file(test_rom_path, false);
+        let mut cpu = Cpu::new(cartridge, model);
+    
+        let mut cycles: u64 = 0;
+        while cycles < TEST_TIMEOUT {
+            cycles += cpu.step() as u64;
+    
+            if cpu.get_serial_output().contains("Passed") {
+                break;
+            } else if cpu.get_serial_output().contains("Failed") {
+                panic!("cpu_instr test ROM failed");
+            }
+        } 
+    }
 }

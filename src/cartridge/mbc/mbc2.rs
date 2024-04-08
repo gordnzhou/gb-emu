@@ -113,7 +113,7 @@ impl Mbc for Mbc2 {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_mooneye_rom;
+    use crate::cpu::test_helpers::test_mooneye_rom;
     use crate::cpu::GBModel::DMG;
     
     #[test]

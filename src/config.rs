@@ -1,19 +1,4 @@
-use sdl2::keyboard::Keycode;
-use crate::emulator::BYTES_PER_PIXEL;
-
-// in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
-pub const KEYMAPPINGS: [Keycode; 8] = [
-    Keycode::I,
-    Keycode::J,
-    Keycode::K,
-    Keycode::L,
-    Keycode::S,
-    Keycode::W,
-    Keycode::A,
-    Keycode::D,
-];
-
-pub const SCREEN_SCALE: i32 = 5;
+use crate::constants::BYTES_PER_PIXEL;
 
 // (CGB ONLY) set to true for display colours to be more 
 // realistic to actual hardware
@@ -34,5 +19,3 @@ pub const CGB_BOOTROM_PATH: &str = "bootroms/bootrom.gbc";
 pub const SAMPLING_RATE_HZ: u32 = 48000;
 
 pub const AUDIO_SAMPLES: usize = 2048;
-
-pub const MASTER_VOLUME: f32 = 0.2;

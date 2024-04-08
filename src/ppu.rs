@@ -1,6 +1,8 @@
 use std::cmp::min;
 
-use crate::{cpu::GBModel, emulator::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH}, COLOURS, WITH_COLOUR_CORRECTION};
+use crate::cpu::GBModel;
+use crate::constants::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH};
+use crate::config::{WITH_COLOUR_CORRECTION, COLOURS};
 
 const TILE_SIZE: usize = 16;
 const TILE_ENTRIES: usize = 384;

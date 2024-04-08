@@ -1,14 +1,21 @@
 [package]
-name = "gb-emu"
+name = "melon-gb"
 version = "0.1.0"
+description = "A Gameboy/Gameboy Color Emulator built with Rust + SDL2"
+authors = ["Gordon Zhou gordonzhou223@gmail.com"]
+repository = "https://github.com/gordnzhou/melon-gb"
+license = "MPL-2.0"
 edition = "2021"
 build = "build.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "gbemulib"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+wasm-bindgen = "0.2.92"
 
-
-[dependencies.sdl2]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.sdl2]
 version = "0.36"
 features = ["use_mac_framework"]

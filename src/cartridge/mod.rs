@@ -6,7 +6,7 @@ mod rtc;
 use std::fs::File;
 use std::io::{self, Read};
 
-use crate::{CGB_BOOTROM_PATH, DMG_BOOTROM_PATH};
+use crate::config::{CGB_BOOTROM_PATH, DMG_BOOTROM_PATH};
 
 use self::header::Header;
 use self::mbc::Mbc;

@@ -159,8 +159,7 @@ impl Mbc for Mbc1 {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_mooneye_rom;
-    use crate::cpu::GBModel::DMG;
+    use crate::cpu::{test_helpers::test_mooneye_rom, GBModel::DMG};
     
     #[test]
     fn mbc1_bits_test() {

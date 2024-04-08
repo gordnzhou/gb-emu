@@ -1,11 +1,11 @@
-use crate::emulator::{LCD_BYTE_WIDTH, LCD_HEIGHT};
+use crate::config::AUDIO_SAMPLES;
+use crate::constants::{LCD_BYTE_WIDTH, LCD_HEIGHT};
 use crate::joypad::Joypad;
 use crate::apu::Apu;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
 use crate::cartridge::Cartridge;
 use crate::cpu::{GBModel, Interrupt};
-use crate::AUDIO_SAMPLES;
 
 const WRAM_SIZE: usize = 0x1000;
 const HRAM_SIZE: usize = 0x0080;
@@ -418,6 +418,7 @@ impl Bus {
         self.joypad.update(status)
     }
 
+    #[allow(dead_code)]
     pub fn get_serial_output(&self) -> &str {
         &self.serial_output
     }

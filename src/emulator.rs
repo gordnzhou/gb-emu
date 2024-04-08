@@ -1,6 +1,7 @@
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
+use gbemulib::constants::{LCD_BYTE_WIDTH, LCD_HEIGHT, LCD_WIDTH, T_CYCLE_DURATION_NS};
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::{AudioSubsystem, Sdl};
 use sdl2::video::Window;
@@ -13,22 +14,25 @@ use sdl2::EventPump;
 
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, GBModel};
-use crate::{AUDIO_SAMPLES, KEYMAPPINGS, MASTER_VOLUME, SAMPLING_RATE_HZ, SCREEN_SCALE};
+use crate::config::{AUDIO_SAMPLES, SAMPLING_RATE_HZ};
 
-pub const LCD_WIDTH: usize= 160;
-pub const LCD_HEIGHT: usize = 144;
+// in order of: START, SELECT, B, A, DOWN, UP, LEFT, RIGHT.
+pub const KEYMAPPINGS: [Keycode; 8] = [
+    Keycode::I,
+    Keycode::J,
+    Keycode::K,
+    Keycode::L,
+    Keycode::S,
+    Keycode::W,
+    Keycode::A,
+    Keycode::D,
+];
+
+pub const SCREEN_SCALE: i32 = 5;
+
+pub const MASTER_VOLUME: f32 = 0.2;
 
 const PIXEL_FORMAT: PixelFormatEnum = PixelFormatEnum::ARGB8888;
-pub const BYTES_PER_PIXEL: usize = 4;
-
-pub const LCD_BYTE_WIDTH: usize = BYTES_PER_PIXEL * LCD_WIDTH;
-
-// DETERMINES GAME SPEED
-pub const T_CYCLE_HZ: u32 = 1 << 22;
-pub const M_CYCLE_HZ: u32 = T_CYCLE_HZ >> 2;
-
-// 1 T Cycle = 2^22 Hz = 1/4 M-cycle = 238.4... ns
-pub const T_CYCLE_DURATION_NS: u64 = (1e9 as u32 / T_CYCLE_HZ) as u64;
 
 pub struct Emulator {
     event_pump: EventPump,
