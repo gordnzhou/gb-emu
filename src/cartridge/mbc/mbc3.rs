@@ -20,14 +20,7 @@ pub struct Mbc3 {
 }
 
 impl Mbc3 {
-    pub fn new(rom_path: &str, rom_banks: usize) -> Self {
-        let rom = match super::read_rom_from_file(rom_path, rom_banks) {
-            Ok(rom) => rom,
-            Err(err) => {
-                panic!("Error reading ROM from {}: {}", rom_path, err);
-            }
-        };
-        
+    pub fn new(rom: Vec<[u8; ROM_BANK_SIZE]>, rom_banks: usize) -> Self {    
         Mbc3 {
             rom,
             rom_banks,
@@ -58,10 +51,9 @@ impl Mbc3 {
 
     /// Specifies Battery and loads in existing RAM (if ram is not None), 
     /// and RTC registers (if timer is not None).
-    pub fn with_battery(mut self, title: String) -> Self {
-        let battery = Battery::new(title);    
+    pub fn with_battery(mut self, battery: Battery) -> Self {   
         if self.ram.is_some() {
-            match battery.load_ram_from_file() {
+            match battery.load_ram() {
                 Some(ram) => {
                     assert!(ram.len() == self.ram_banks, "Invalid RAM Save Size!");
                     self.ram = Some(ram)
@@ -70,7 +62,7 @@ impl Mbc3 {
             };
         }
         if self.rtc.is_some() {
-            match battery.load_rtc_from_file() {
+            match battery.load_rtc() {
                 Some(rtc) => self.rtc = Some(rtc),
                 None => {}
             }
@@ -183,12 +175,12 @@ impl Mbc for Mbc3 {
         };
 
         match &self.ram {
-            Some(ram) => battery.save_ram_to_file(ram),
+            Some(ram) => battery.save_ram(ram),
             None => {}
         };
 
         match &self.rtc {
-            Some(rtc) => battery.save_rtc_to_file(rtc),
+            Some(rtc) => battery.save_rtc(rtc),
             None => {}
         }
     }

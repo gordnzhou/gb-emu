@@ -1,5 +1,8 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
+#[cfg(target_arch = "wasm32")]
+use js_sys::Date;
 
 pub const RTC_REGISTERS_SIZE: usize = 5;
 
@@ -114,6 +117,7 @@ impl Rtc {
     }
 
     /// Gets the current time represented as seconds elapsed since UNIX_EPOCH.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_current_time() -> u64 {
         match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(duration) => duration.as_secs(),
@@ -122,5 +126,11 @@ impl Rtc {
                 0
             }
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn get_current_time() -> u64 {
+        let date = Date::new_0();
+        (date.get_time() / 1000.0) as u64
     }
 }

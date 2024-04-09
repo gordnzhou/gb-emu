@@ -18,11 +18,10 @@ use emulator::Emulator;
 use gbemulib::constants;
 
 const ROM_PATH: &str = "roms/pokemoncrystal.gbc";
-const WITH_BOOTROM: bool = true;
+const WITH_BOOTROM: bool = false;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), String> {
-    
     let cartridge = Cartridge::from_file(ROM_PATH, WITH_BOOTROM);
     let mut emulator = Emulator::load_cartridge(cartridge)?;
     emulator.run_for_duration(40e12 as u64);

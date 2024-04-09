@@ -17,6 +17,12 @@ pub use cpu::Cpu;
 use cpu::GBModel;
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    pub fn log(s: &str);
+}
+
 pub mod constants {
     pub const LCD_WIDTH: usize= 160;
     pub const LCD_HEIGHT: usize = 144;
@@ -40,15 +46,15 @@ pub struct Emulator {
 
 #[wasm_bindgen]
 impl Emulator {
-    pub fn new() -> Self {
-        let cartridge = Cartridge::from_file("roms/drmario.gb", true);
+    pub fn new(cartridge_bytes: &[u8]) -> Self {
+        let cartridge = Cartridge::from_bytes(cartridge_bytes);
 
         let model = if cartridge.cgb_compatible() {
             GBModel::CGB
         } else {
             GBModel::DMG
         };
-        println!("detected model: {:?}", model);
+        log(&format!("detected model: {:?}", model));
 
         Emulator { 
             cpu: Cpu::new(cartridge, model),

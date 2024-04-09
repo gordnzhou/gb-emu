@@ -30,13 +30,27 @@ pub struct Header {
 }
 
 impl Header {
-    /// Constructs cartridge header using bytes from addresses 0x100 to 0x14F.
     pub fn from_file(rom_path: &str) -> io::Result<Self> {
         let mut file = File::open(rom_path)?;
         file.seek(SeekFrom::Start(HEADER_START as u64))?;
-        let mut header_bytes = vec![0; HEADER_SIZE];
+        let mut header_bytes = [0; HEADER_SIZE];
         file.read_exact(&mut header_bytes)?;
 
+        Ok(Header::new(header_bytes))
+    }
+
+    #[allow(dead_code)]
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut header_bytes = [0; HEADER_SIZE];
+        for i in 0..HEADER_SIZE {
+            header_bytes[i] = bytes[HEADER_START + i];
+        }
+
+        Header::new(header_bytes)
+    }
+
+    /// Constructs a header using header_bytes (from addresses 0x0100 to 0x014F)
+    pub fn new(header_bytes: [u8; HEADER_SIZE]) -> Self {
         let nintendo_logo = header_bytes[0x04..=0x33].try_into().unwrap();
 
         let cgb_flag = header_bytes[0x43];
@@ -86,7 +100,7 @@ impl Header {
         }
         assert!(checksum == header_checksum, "Header bytes do not match header checksum.");
 
-        Ok(Header {
+        Header {
             nintendo_logo,
             title,
             manufacturer_code,
@@ -100,7 +114,7 @@ impl Header {
             version_number,
             header_checksum, 
             global_checksum,
-        })
+        }
     }
 
     pub fn num_rom_banks(&self) -> usize {

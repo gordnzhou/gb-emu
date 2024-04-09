@@ -18,14 +18,7 @@ pub struct Mbc1 {
 }
 
 impl Mbc1 {
-    pub fn new(rom_path: &str, rom_banks: usize) -> Self {
-        let rom = match super::read_rom_from_file(rom_path, rom_banks) {
-            Ok(rom) => rom,
-            Err(err) => {
-                panic!("Error reading ROM from {}: {}", rom_path, err);
-            }
-        };
-        
+    pub fn new(rom: Vec<[u8; ROM_BANK_SIZE]>, rom_banks: usize) -> Self {  
         Mbc1 {
             rom,
             rom_banks,
@@ -48,9 +41,8 @@ impl Mbc1 {
 
     /// ASSUMES: RAM has already be set to not None
     /// Specifies battery and loads last RAM save (if any exists), otherwise creates a new one.
-    pub fn with_battery(mut self, title: String) -> Self {
-        let battery = Battery::new(title);  
-        self.ram = Some(match battery.load_ram_from_file() {
+    pub fn with_battery(mut self, battery: Battery) -> Self { 
+        self.ram = Some(match battery.load_ram() {
             Some(ram) => {
                 assert!(ram.len() == self.ram_banks, "Invalid RAM Save Size!");
                 ram
@@ -153,7 +145,7 @@ impl Mbc for Mbc1 {
             None => return
         };
 
-        battery.save_ram_to_file(ram);
+        battery.save_ram(ram);
     }
 }
 

@@ -28,6 +28,21 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
+    /// Loads cartridge from array slice of bytes (TODO: currently does NOT support bootrom)
+    #[allow(dead_code)]
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let header = Header::from_bytes(bytes);
+        Cartridge { 
+            bootrom: [0; BOOTROM_SIZE],
+            bootrom2: [0; BOOTROM_2_END - BOOTROM_2_START],
+            mbc: mbc::make_mbc(bytes, &header),
+            cgb_bootrom: false,
+            bank: 1,
+            header,
+            with_bootrom: false,
+        }
+    }
+
     /// Loads cartridge from the given file path (and optionally runs it with boot ROM).
     pub fn from_file(rom_path: &str, with_bootrom: bool) -> Self {
         let header = match Header::from_file(rom_path) {
@@ -77,7 +92,11 @@ impl Cartridge {
             }
         }
 
-        let mbc = mbc::make_mbc(rom_path, &header);
+        let rom_bytes =  match Cartridge::read_from_file(rom_path) {
+            Ok(rom) => rom,
+            Err(e) => panic!("{}", e),
+        };
+        let mbc = mbc::make_mbc(&rom_bytes, &header);
         println!("Detected MBC: {}", mbc.display());
 
         Cartridge { 

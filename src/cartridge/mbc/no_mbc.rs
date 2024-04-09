@@ -1,4 +1,4 @@
-use crate::{bus::{RAM_START, ROM_START}, cartridge::Cartridge};
+use crate::bus::{RAM_START, ROM_START};
 use super::{Mbc, RAM_MEMORY_SPACE, ROM_MEMORY_SPACE};
 
 
@@ -34,19 +34,11 @@ impl Mbc for NoMbc {
 }
 
 impl NoMbc {
-    pub fn new(rom_path: &str) -> Self {
+    pub fn new(rom_bytes: &[u8]) -> Self {
         let mut rom = [0; ROM_MEMORY_SPACE];
-        match Cartridge::read_from_file(rom_path) {
-            Ok(rom_data) => {
-                for i in 0..rom_data.len() {
-                    rom[i] = rom_data[i];
-                }
-            }
-            Err(err) => {
-                panic!("Error reading ROM from {}: {}", rom_path, err);
-            }
+        for i in 0..rom_bytes.len() {
+            rom[i] = rom_bytes[i];
         }
-
         NoMbc { 
             rom,
             ram: [0; RAM_MEMORY_SPACE],
