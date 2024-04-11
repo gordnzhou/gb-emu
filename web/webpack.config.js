@@ -13,7 +13,10 @@ module.exports = {
   },
   plugins: [
     new CopyPlugin({
-      patterns: [{ from: "index.html" }],
+      patterns: [
+        { from: "index.html" },
+        { from: "audio.js" },
+      ],
     }),
   ],
 };

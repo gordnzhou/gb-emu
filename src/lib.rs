@@ -10,8 +10,8 @@ mod timer;
 mod cartridge;
 
 pub use cartridge::Cartridge;
-use config::AUDIO_SAMPLES;
-use constants::{BYTES_PER_PIXEL, LCD_BYTE_WIDTH, LCD_HEIGHT};
+use config::{AUDIO_SAMPLES, SAMPLING_RATE_HZ};
+use constants::{BYTES_PER_PIXEL, LCD_HEIGHT, LCD_WIDTH};
 pub use cpu::Cpu;
 
 use cpu::GBModel;
@@ -41,13 +41,16 @@ pub mod constants {
 
 #[wasm_bindgen]
 pub struct Emulator {
+    title: String,
     cpu: Cpu,
+    audio_output_flat: [f32; 2 * AUDIO_SAMPLES],
 }
 
 #[wasm_bindgen]
 impl Emulator {
     pub fn new(cartridge_bytes: &[u8]) -> Self {
         let cartridge = Cartridge::from_bytes(cartridge_bytes);
+        let title = cartridge.get_title();
 
         let model = if cartridge.cgb_compatible() {
             GBModel::CGB
@@ -57,24 +60,39 @@ impl Emulator {
         log(&format!("detected model: {:?}", model));
 
         Emulator { 
+            title,
             cpu: Cpu::new(cartridge, model),
+            audio_output_flat: [0.0; 2 * AUDIO_SAMPLES],
         }
-
     }
 
     pub fn step(&mut self) {
         self.cpu.step();
     }
 
-    pub fn get_audio_output(&mut self) -> Option<*const [f32; 2]> {
+    pub fn game_title(&self) -> String {
+        self.title.clone()
+    }
+
+    pub fn get_audio_output(&mut self) -> Option<*const f32> {
         match self.cpu.get_audio_output() {
-            Some(audio_output) => Some(audio_output.as_ptr()),
+            Some(audio_output) => {
+                for i in 0..AUDIO_SAMPLES {
+                    self.audio_output_flat[2 * i] = audio_output[i][0];
+                    self.audio_output_flat[2 * i + 1] = audio_output[i][1];
+                }
+                Some(self.audio_output_flat.as_ptr())
+            },
             None => None
         }
     }
 
-    pub fn audio_output_length(&self) -> usize {
-        AUDIO_SAMPLES
+    pub fn audio_output_length() -> usize {
+        2 * AUDIO_SAMPLES
+    }
+
+    pub fn audio_rate() -> u32 {
+        SAMPLING_RATE_HZ
     }
 
     pub fn get_display_output(&mut self) -> Option<*const u8> {
@@ -84,15 +102,15 @@ impl Emulator {
         }
     }
 
-    pub fn display_height(&self) -> usize {
+    pub fn display_height() -> usize {
         LCD_HEIGHT
     }
 
-    pub fn display_width(&self) -> usize {
-        LCD_BYTE_WIDTH
+    pub fn display_width() -> usize {
+        LCD_WIDTH
     }
 
-    pub fn display_byte_length(&self) -> usize {
+    pub fn display_byte_length() -> usize {
         BYTES_PER_PIXEL
     }
 
