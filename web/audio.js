@@ -26,22 +26,29 @@ class RingBuffer {
 }
 
 class GBAudioProcessor extends AudioWorkletProcessor {
-    constructor() {
+    constructor(options) {
         super();
-        this.ringBuffer = new RingBuffer(8 * 2048);
+        this.sampleRate = options.processorOptions.sampleRate;
+        this.prev_sample = 0.0;
+        this.ringBuffer = new RingBuffer(10 * 4096);
         this.port.onmessage = event => {
-            this.ringBuffer.push(event.data);
+            event.data.forEach(sample => this.ringBuffer.push(sample));
         };
     }
   
     process(inputs, outputs, parameters) {
         const output = outputs[0];
-        
-        for (let i = 0; i < output[channel].length; ++i) {
-            output[0][i] = this.ringBuffer.pull();
-            output[1][i] = this.ringBuffer.pull();
-        }
 
+        for (let i = 0; i < output[0].length; ++i) {
+            if (this.ringBuffer.isEmpty()) {
+                // this.port.postMessage("EMPTY");
+                output[0][i] = this.prev_sample;
+            } else {
+                this.prev_sample = (this.ringBuffer.pull() + this.ringBuffer.pull()) / 2;
+                output[0][i] = this.prev_sample;
+            }
+        }
+    
         return true;
     }
 }

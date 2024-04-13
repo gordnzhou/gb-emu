@@ -21,10 +21,68 @@ const DISPLAY_BYTE_LEN = Emulator.display_byte_length();
 const AUDIO_OUTPUT_LEN = Emulator.audio_output_length();
 
 let emulator = null;
+let stopMainLoop = true;
 
-let key_status = 0xFF;
+let main_loop = () => {
+    if (stopMainLoop) {
+        return;
+    }
+
+    let audio_output_ptr = null;
+    let display_output_ptr = null;
+
+    let dur = 0;
+    while (audio_output_ptr == null && display_output_ptr == null) {
+        if (dur % 2 == 0) {
+            emulator.update_joypad(key_status);
+        }
+        emulator.step();
+        audio_output_ptr = emulator.get_audio_output();
+        display_output_ptr = emulator.get_display_output();
+        dur++;
+    }
+
+    if (audio_output_ptr != null) {
+        const audio_output = new Float32Array(
+            memory.buffer,
+            audio_output_ptr,
+            AUDIO_OUTPUT_LEN
+        ) 
+        audioNode.port.postMessage(audio_output);
+    }
+
+    if (display_output_ptr != null) {
+        update_canvas(display_output_ptr);
+
+    }
+
+    setTimeout(main_loop, 0)
+} 
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    var file = e.target.files[0];
+    if (!file) {
+        console.log("No file selected");
+        return;
+    }
+
+    stopMainLoop = true;
+
+    initializeAudio();
+
+    var reader = new FileReader();
+    reader.readAsArrayBuffer(file);
+    reader.onload = function(e) {
+        stopMainLoop = false;
+        startEmulator(e)
+    };
+});
+
+
 
 // INPUT------
+let key_status = 0xFF;
+
 window.addEventListener('keydown', function(event) {
     for (let i = 0; i < 8; i++) {
         if (event.key == KEYMAPPINGS[i]) {
@@ -77,71 +135,48 @@ const update_canvas = (display_output_ptr) => {
 // DISPLAY------
 
 
+// AUDIO------
+let audioContext;
+let audioNode;
+
 const startEmulator = (e) => {
     var arrayBuffer = e.target.result;
     var byteArray = new Uint8Array(arrayBuffer);
 
     emulator = Emulator.new(byteArray);
 
-    const audioContext = new AudioContext();
-    audioContext.resume();
-    let audio_node;
-    (async function() {
-        await audioContext.audioWorklet.addModule('audio.js');
-        audio_node = new AudioWorkletNode(audioContext, 'gb-audio-processor');
-        audio_node.connect(audioContext.destination);
-    })();
+    main_loop();
 
     console.log(canvas.height, canvas.width, emulator.game_title());
-    
-    let main_loop = () => {
-        let audio_output_ptr = null;
-        let display_output_ptr = null;
+} 
 
-        let dur = 0;
-        while (audio_output_ptr == null && display_output_ptr == null) {
-            if (dur % 4 == 0) {
-                emulator.update_joypad(key_status);
-            }
-            emulator.step();
-            audio_output_ptr = emulator.get_audio_output();
-            display_output_ptr = emulator.get_display_output();
-            dur++;
-        }
-        
-        let timeout_ms = 0;
-
-        if (audio_output_ptr != null && audio_node) {
-            const audio_output = new Float32Array(
-                memory.buffer,
-                audio_output_ptr,
-                AUDIO_OUTPUT_LEN
-            ) 
-            audio_node.port.postMessage(audio_output);
-            // timeout_ms += 1000 / 60
-        }
-    
-        if (display_output_ptr != null) {
-            update_canvas(display_output_ptr);
-            timeout_ms += 1000 / 60
-        }
-
-        setTimeout(main_loop, timeout_ms)
-    }  
-
-    main_loop();
-}
-
-document.getElementById('fileInput').addEventListener('change', function(e) {
-    var file = e.target.files[0];
-    if (!file) {
-        console.log("No file selected");
-        return;
+const initializeAudio = () => {
+    if (audioNode != null) {
+        audioNode.disconnect();
+        audioNode = null;
     }
-
-    var reader = new FileReader();
-    reader.readAsArrayBuffer(file);
-    reader.onload = function(e) {
-        startEmulator(e)
-    };
-});
+    
+    if (audioContext != null) {
+        audioContext.close().then(() => {
+            audioContext = null;
+            setupAudioContextAndNode();
+        });
+    } else {
+        setupAudioContextAndNode();
+    }
+    
+    function setupAudioContextAndNode() {
+        audioContext = new AudioContext();
+        audioContext.audioWorklet.addModule('audio.js').then(() => {
+            audioNode = new AudioWorkletNode(audioContext, 'gb-audio-processor', {
+                processorOptions: { sampleRate: audioContext.sampleRate }
+            });
+    
+            audioNode.port.onmessage = (e) => console.log(e.data);
+            audioNode.connect(audioContext.destination);
+    
+            audioContext.resume();
+        });
+    }
+}
+// AUDIO------
