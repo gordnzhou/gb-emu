@@ -31,6 +31,11 @@ impl Mbc for NoMbc {
     fn save_state(&self) {
         // do nothing
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_save(&mut self, _data: Vec<u8>, _save_type: &str) {
+        // do nothing
+    }
 }
 
 impl NoMbc {

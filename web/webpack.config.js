@@ -16,6 +16,7 @@ module.exports = {
       patterns: [
         { from: "index.html" },
         { from: "audio.js" },
+        { from: "persistence.js" },
       ],
     }),
   ],

@@ -20,7 +20,6 @@ const WIDTH = Emulator.display_width();
 const DISPLAY_BYTE_LEN = Emulator.display_byte_length();
 const AUDIO_OUTPUT_LEN = Emulator.audio_output_length();
 
-let emulator = null;
 let stopMainLoop = true;
 
 let main_loop = () => {
@@ -34,11 +33,11 @@ let main_loop = () => {
     let dur = 0;
     while (audio_output_ptr == null && display_output_ptr == null) {
         if (dur % 2 == 0) {
-            emulator.update_joypad(key_status);
+            window.emulator.update_joypad(key_status);
         }
-        emulator.step();
-        audio_output_ptr = emulator.get_audio_output();
-        display_output_ptr = emulator.get_display_output();
+        window.emulator.step();
+        audio_output_ptr = window.emulator.get_audio_output();
+        display_output_ptr = window.emulator.get_display_output();
         dur++;
     }
 
@@ -53,7 +52,6 @@ let main_loop = () => {
 
     if (display_output_ptr != null) {
         update_canvas(display_output_ptr);
-
     }
 
     setTimeout(main_loop, 0)
@@ -143,11 +141,15 @@ const startEmulator = (e) => {
     var arrayBuffer = e.target.result;
     var byteArray = new Uint8Array(arrayBuffer);
 
-    emulator = Emulator.new(byteArray);
+    if (window.emulator != null) {
+       window.emulator.save_game();
+    }
+
+    window.emulator = Emulator.new(byteArray);
 
     main_loop();
 
-    console.log(canvas.height, canvas.width, emulator.game_title());
+    console.log(canvas.height, canvas.width, window.emulator.game_title());
 } 
 
 const initializeAudio = () => {

@@ -1,6 +1,13 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::{create_dir_all, read, write};
 
+
+#[cfg(target_arch = "wasm32")]
+use {
+    serde_wasm_bindgen::{from_value, to_value},
+    crate::{save_to_db, load_from_db, log},
+};
+
 use super::{mbc::RAM_BANK_SIZE, rtc::{Rtc, RTC_REGISTERS_SIZE}};
 pub const SAVE_PATH: &str = "saves";
 
@@ -44,13 +51,8 @@ impl Battery {
     pub fn load_ram(&self) -> Option<Vec<[u8; RAM_BANK_SIZE]>> {
         match read(&self.ram_file_location) {
             Ok(data) => {
-                let ram = data.chunks_exact(RAM_BANK_SIZE).map(|chunk| {
-                    let mut bank = [0; RAM_BANK_SIZE];
-                    bank.copy_from_slice(chunk);
-                    bank
-                }).collect();
                 println!("loaded RAM from {}", self.ram_file_location);
-                Some(ram)
+                Some(Battery::parse_ram(data))
             }
             Err(_) => {
                 println!("No RAM save detected...");
@@ -75,16 +77,30 @@ impl Battery {
     pub fn load_rtc(&self) -> Option<Rtc> {
         match read(&self.rtc_file_location) {
             Ok(data) => {
-                let mut registers = [0; RTC_REGISTERS_SIZE + 8];
-                registers.copy_from_slice(&data[0..RTC_REGISTERS_SIZE + 8]);
                 println!("loaded RTC state from {}", self.ram_file_location);
-                Some(Rtc::from_save(registers))
+                Some(Battery::parse_rtc(data))
             }
             Err(_) => {
                 println!("No RTC save detected...");
                 None
             }
         }
+    }
+}
+
+impl Battery {
+    pub fn parse_ram(data: Vec<u8>) -> Vec<[u8; RAM_BANK_SIZE]> {
+        data.chunks_exact(RAM_BANK_SIZE).map(|chunk| {
+            let mut bank = [0; RAM_BANK_SIZE];
+            bank.copy_from_slice(chunk);
+            bank
+        }).collect()
+    }
+
+    pub fn parse_rtc(data: Vec<u8>) -> Rtc {
+        let mut registers = [0; RTC_REGISTERS_SIZE + 8];
+        registers.copy_from_slice(&data[0..RTC_REGISTERS_SIZE + 8]);
+        Rtc::from_save(registers)
     }
 }
 
@@ -102,18 +118,21 @@ impl Battery {
     }
 
     pub fn save_ram(&self, ram: &Vec<[u8; RAM_BANK_SIZE]>) {
-
+        let ram_flat: Vec<u8> = ram.iter().flatten().copied().collect();
+        save_to_db(&self.store_name, "ram", to_value(&ram_flat).unwrap());
     }
 
     pub fn load_ram(&self) -> Option<Vec<[u8; RAM_BANK_SIZE]>> {
+        load_from_db(&self.store_name, "ram");
         None
     }
 
     pub fn save_rtc(&self, rtc: &Rtc) {
-    
+        save_to_db(&self.store_name, "rtc", to_value(&rtc.to_save()).unwrap())
     }
 
     pub fn load_rtc(&self) -> Option<Rtc> {
+        load_from_db(&self.store_name, "rtc");
         None
     }
 }

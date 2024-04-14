@@ -39,6 +39,9 @@ pub trait Mbc {
 
     /// Handles saving of MBC state (if it includes battery).
     fn save_state(&self);
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_save(&mut self, data: Vec<u8>, save_type: &str);
 }
 
 pub fn make_mbc(rom_bytes: &[u8], header: &Header) -> Box<dyn Mbc> {

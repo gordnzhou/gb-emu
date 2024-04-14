@@ -426,4 +426,9 @@ impl Bus {
     pub fn save_mbc_state(&mut self) {
         self.cartridge.save_mbc_state()
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        self.cartridge.load_save(data, save_type);
+    }
 }

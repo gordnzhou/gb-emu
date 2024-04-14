@@ -101,6 +101,16 @@ impl Mbc for Mbc2 {
         }
         battery.save_ram(&ram);
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        assert!(save_type == "ram");
+
+        let ram = Battery::parse_ram(data);
+        for i in 0..MBC2_RAM_SIZE {
+            self.ram[i] = ram[0][i] & 0xF;
+        }
+    }
 }
 
 #[cfg(test)]

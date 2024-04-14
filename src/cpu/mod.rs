@@ -194,6 +194,11 @@ impl Cpu {
     pub fn read_byte(&self, addr: u16) -> u8 {
         self.bus.read_byte(addr)
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        self.bus.load_save(data, save_type);
+    }
 }
 
 #[cfg(test)]

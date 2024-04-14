@@ -21,6 +21,12 @@ use wasm_bindgen::prelude::*;
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     pub fn log(s: &str);
+
+    #[wasm_bindgen(js_namespace = Persistence)]
+    pub fn load_from_db(store_name: &str, save_type: &str);
+
+    #[wasm_bindgen(js_namespace = Persistence)]
+    pub fn save_to_db(store_name: &str, save_type: &str, save_data: JsValue);
 }
 
 pub mod constants {
@@ -120,5 +126,14 @@ impl Emulator {
 
     pub fn update_joypad(&mut self, status: u8) {
         self.cpu.update_joypad(status)
+    }
+
+    pub fn save_game(&mut self) {
+        self.cpu.save_mbc_state()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        self.cpu.load_save(data, save_type);
     }
 }

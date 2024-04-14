@@ -17,6 +17,9 @@ use cartridge::Cartridge;
 use emulator::Emulator;
 use gbemulib::constants;
 
+#[cfg(target_arch = "wasm32")]
+use gbemulib::{load_from_db, save_to_db, log};
+
 const ROM_PATH: &str = "roms/pokemoncrystal.gbc";
 const WITH_BOOTROM: bool = false;
 

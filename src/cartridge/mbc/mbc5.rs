@@ -126,6 +126,12 @@ impl Mbc for Mbc5 {
 
         battery.save_ram(ram);
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        assert!(save_type == "ram");
+        self.ram = Some(Battery::parse_ram(data));
+    }
 }
 
 #[cfg(test)]

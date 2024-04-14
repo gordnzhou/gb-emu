@@ -184,4 +184,13 @@ impl Mbc for Mbc3 {
             None => {}
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        if save_type == "ram" {
+            self.ram = Some(Battery::parse_ram(data));
+        } else {
+            self.rtc = Some(Battery::parse_rtc(data));
+        }
+    }
 }

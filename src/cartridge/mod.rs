@@ -169,4 +169,9 @@ impl Cartridge {
     pub fn write_ram(&mut self, addr: usize, byte: u8) {
         self.mbc.write_ram(addr, byte);
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
+        self.mbc.load_save(data, save_type)
+    }
 }
