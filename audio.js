@@ -31,6 +31,7 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         this.sampleRate = options.processorOptions.sampleRate;
         this.prev_sample = 0.0;
         this.ringBuffer = new RingBuffer(10 * 4096);
+        this.port.postMessage("SAMPLE RATE: " + this.sampleRate);
         this.port.onmessage = event => {
             if (event.data === 'clearBuffer') {
                 this.clearBuffer();
@@ -56,7 +57,6 @@ class GBAudioProcessor extends AudioWorkletProcessor {
     }
 
     clearBuffer() {
-        this.port.postMessage("clear");
         this.ringBuffer = new RingBuffer(10 * 4096);
     }
 }
