@@ -32,7 +32,11 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         this.prev_sample = 0.0;
         this.ringBuffer = new RingBuffer(10 * 4096);
         this.port.onmessage = event => {
-            event.data.forEach(sample => this.ringBuffer.push(sample));
+            if (event.data === 'clearBuffer') {
+                this.clearBuffer();
+            } else {
+                event.data.forEach(sample => this.ringBuffer.push(sample));
+            }
         };
     }
   
@@ -49,6 +53,11 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         }
     
         return true;
+    }
+
+    clearBuffer() {
+        this.port.postMessage("clear");
+        this.ringBuffer = new RingBuffer(10 * 4096);
     }
 }
   
