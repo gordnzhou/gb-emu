@@ -1,0 +1,76 @@
+body {
+    font-family: "Lato", sans-serif;
+    font-style: normal;
+    color: black;
+}
+
+#header-container {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 5px solid black;
+}
+
+#content-container {
+    display: flex;
+    justify-content: center;
+}
+
+#display-container {
+    position: relative;
+}
+
+#gb-display {
+    border: 40px;
+    border-left: 70px;
+    border-right: 70px;
+    border-color: #393939;
+    border-style: solid;
+    border-radius: 20px;
+    margin: 20px;
+}
+
+#display-container::before {
+    z-index: 500;
+    content: "";
+    position: absolute;
+    left: 6%;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 30px; 
+    height: 30px; 
+    background-color: rgb(184, 34, 34);
+    border-radius: 50%;
+}
+
+#repo-link {
+    color: inherit;
+    text-decoration: underline;
+}
+
+#rom-file-input {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-inline: 20px;
+}
+
+#volume-slider-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-inline: 20px;
+}
+
+#button-container {
+    display: flex;
+    justify-content: space-evenly;
+    align-items: center;
+}
+
+.styled-button {
+    margin-inline: 10px;
+    font-family: "Lato", sans-serif;
+    font-weight: 400;
+    font-size: 15px;
+    text-decoration: none;
+}

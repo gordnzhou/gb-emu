@@ -41,7 +41,6 @@ class GBAudioProcessor extends AudioWorkletProcessor {
 
         for (let i = 0; i < output[0].length; ++i) {
             if (this.ringBuffer.isEmpty()) {
-                // this.port.postMessage("EMPTY");
                 output[0][i] = this.prev_sample;
             } else {
                 this.prev_sample = (this.ringBuffer.pull() + this.ringBuffer.pull()) / 2;

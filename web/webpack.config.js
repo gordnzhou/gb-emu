@@ -2,7 +2,7 @@ const CopyPlugin = require("copy-webpack-plugin");
 const path = require("path");
 
 module.exports = {
-  entry: "./index.js",
+  entry: "./js/index.js",
   output: {
     path: path.resolve(__dirname, "dist"),
     filename: "index.js",
@@ -15,8 +15,9 @@ module.exports = {
     new CopyPlugin({
       patterns: [
         { from: "index.html" },
-        { from: "audio.js" },
-        { from: "persistence.js" },
+        { from: "styles.css" },
+        { from: "js/audio.js" },
+        { from: "js/persistence.js" },
       ],
     }),
   ],
