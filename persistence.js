@@ -5,7 +5,6 @@ window.Persistence = {
     load_from_db: function(gameId, saveType) {
         const request = indexedDB.open(DB_NAME, 2);
 
-
         request.onupgradeneeded = function(event) {
             const db = event.target.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -25,6 +24,7 @@ window.Persistence = {
             request.onsuccess = function(event) {
                 result = request.result ? request.result : null;
                 if (result != null) {
+                    console.log("loading from: ", keyName, data)
                     window.emulator.load_save(new Uint8Array(result), saveType);
                 }
             };
