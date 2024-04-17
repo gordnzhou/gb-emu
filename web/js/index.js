@@ -48,30 +48,40 @@ canvas.width = WIDTH * CANVAS_SCALE;
 const ctx = canvas.getContext('2d');
 const CLEAR_COLOUR = "#FFFFE8";
 
+ctx.imageSmoothingEnabled = false;
+ctx.scale(CANVAS_SCALE, CANVAS_SCALE);
+
 const updateCanvas = (displayOutputPtr) => {
     const display_output = new Uint8Array(
         memory.buffer, 
         displayOutputPtr, 
         WIDTH * HEIGHT * DISPLAY_BYTE_LEN
     );
-        
+    
+    let tempCanvas = document.createElement('canvas');
+    tempCanvas.width = WIDTH;
+    tempCanvas.height = HEIGHT;
+    let tempCtx = tempCanvas.getContext('2d');
+
+    let imageData = ctx.createImageData(WIDTH, HEIGHT);
+    let data = imageData.data;
+
+    let i = 0;
     for (let y = 0; y < HEIGHT; y++) {
         for (let x = 0; x < WIDTH; x++) {
             let index = (y * WIDTH + x) * DISPLAY_BYTE_LEN
-            let b = display_output[index];
-            let g = display_output[index + 1];
-            let r = display_output[index + 2];
-            let a = display_output[index + 3] / 255;
 
-            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
-            ctx.fillRect(
-                x * CANVAS_SCALE, 
-                y * CANVAS_SCALE, 
-                CANVAS_SCALE, 
-                CANVAS_SCALE
-            );
+            data[i++] = display_output[index + 2];
+            data[i++] = display_output[index + 1];
+            data[i++] = display_output[index];
+            data[i++] = display_output[index + 3];
         }
     }
+
+    tempCtx.putImageData(imageData, 0, 0);
+
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.drawImage(tempCanvas, 0, 0);
 }
 
 const clearCanvas = () => {   
@@ -133,7 +143,6 @@ const initializeAudio = () => {
 }
 
 const pushAudioSamples = (audioOutputPtr) => {
-    console.log("??")
     const audio_output = new Float32Array(
         memory.buffer,
         audioOutputPtr,
@@ -188,22 +197,24 @@ let main_loop = () => {
     }
 
     if (!paused) {
-        let audioOutputPtr = null;
         let displayOutputPtr = null;
 
         let dur = 0;
-        while (audioOutputPtr == null && displayOutputPtr == null) {
+        while (displayOutputPtr == null) {
             if (dur % 2 == 0) {
                 window.emulator.update_joypad(key_status);
             }
+            
             window.emulator.step();
-            audioOutputPtr = window.emulator.get_audio_output();
-            displayOutputPtr = window.emulator.get_display_output();
-            dur++;
-        }
 
-        if (audioOutputPtr != null) {
-            pushAudioSamples(audioOutputPtr)
+            displayOutputPtr = window.emulator.get_display_output();
+
+            const audioOutputPtr = window.emulator.get_audio_output();
+            if (audioOutputPtr != null) {
+                pushAudioSamples(audioOutputPtr)
+            }
+
+            dur++;
         }
 
         if (displayOutputPtr != null) {
@@ -211,7 +222,7 @@ let main_loop = () => {
         }
     }
 
-    setTimeout(main_loop, 0)
+    setTimeout(main_loop, 1000 / 60)
 } 
 
 (() => {
@@ -220,6 +231,7 @@ let main_loop = () => {
 
 document.getElementById("pause-button").addEventListener("click", () => {
     paused = true;
+    audioNode.port.postMessage('clearBuffer');
 });
 
 document.getElementById("play-button").addEventListener("click", () => {

@@ -6,4 +6,5 @@ Cargo.lock
 .DS_Store
 node_modules/
 web/package-lock.json
+web/dist/
 pkg/

@@ -1,7 +1,8 @@
 {
   "scripts": {
     "build": "webpack --config webpack.config.js",
-    "serve": "webpack serve --config webpack.config.js --open"
+    "serve": "webpack serve --config webpack.config.js --open",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "gb-emu": "file:../pkg",
@@ -9,6 +10,7 @@
   },
   "devDependencies": {
     "copy-webpack-plugin": "^11.0.0",
+    "gh-pages": "^6.1.1",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^4.15.1"

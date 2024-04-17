@@ -31,13 +31,19 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         this.sampleRate = options.processorOptions.sampleRate;
         this.prev_sample = 0.0;
         this.ringBuffer = new RingBuffer(10 * 4096);
+        this.port.postMessage("SAMPLE RATE: " + this.sampleRate);
         this.port.onmessage = event => {
-            event.data.forEach(sample => this.ringBuffer.push(sample));
+            if (event.data === 'clearBuffer') {
+                this.clearBuffer();
+            } else {
+                event.data.forEach(sample => this.ringBuffer.push(sample));
+            }
         };
     }
   
     process(inputs, outputs, parameters) {
         const output = outputs[0];
+        this.port.postMessage("USE: " + output[0].length);
 
         for (let i = 0; i < output[0].length; ++i) {
             if (this.ringBuffer.isEmpty()) {
@@ -49,6 +55,10 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         }
     
         return true;
+    }
+
+    clearBuffer() {
+        this.ringBuffer = new RingBuffer(10 * 4096);
     }
 }
   
