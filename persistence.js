@@ -24,7 +24,7 @@ window.Persistence = {
             request.onsuccess = function(event) {
                 result = request.result ? request.result : null;
                 if (result != null) {
-                    console.log("loading from: ", keyName, result)
+                    console.log("loading from: ", keyName, result);
                     window.emulator.load_save(new Uint8Array(result), saveType);
                 }
             };
