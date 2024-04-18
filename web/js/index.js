@@ -106,10 +106,9 @@ let audioNode;
 let audioVolume = 0.2;
 
 const volumeSlider = document.getElementById('volume-slider');
-volumeSlider.value = audioVolume * 100;
-
+volumeSlider.value = audioVolume;
 volumeSlider.addEventListener('input', function() {
-    audioVolume = this.value / 100;
+    audioVolume = this.value;
 });
 
 const initializeAudio = () => {
@@ -143,13 +142,13 @@ const initializeAudio = () => {
 }
 
 const pushAudioSamples = (audioOutputPtr) => {
-    const audio_output = new Float32Array(
+    const audioOutput = new Float32Array(
         memory.buffer,
         audioOutputPtr,
         AUDIO_OUTPUT_LEN
     )
 
-    audioNode.port.postMessage(audio_output.map(sample => sample * audioVolume));
+    audioNode.port.postMessage(audioOutput.map(sample => sample * audioVolume));
 }
 // AUDIO------
 
@@ -190,6 +189,13 @@ const startEmulator = (e) => {
 
 let stopMainLoop = true;
 let paused = false;
+let gameSpeed = 0.2;
+
+const speedSlider = document.getElementById('speed-slider');
+speedSlider.value = gameSpeed;
+speedSlider.addEventListener('input', function() {
+    gameSpeed = this.value;
+});
 
 let main_loop = () => {
     if (stopMainLoop) {
@@ -201,7 +207,7 @@ let main_loop = () => {
 
         let dur = 0;
         while (displayOutputPtr == null) {
-            if (dur % 2 == 0) {
+            if (dur % 4 == 0) {
                 window.emulator.update_joypad(key_status);
             }
             
@@ -222,7 +228,7 @@ let main_loop = () => {
         }
     }
 
-    setTimeout(main_loop, 1000 / 60)
+    setTimeout(main_loop, (1000 / 60) * (1 - gameSpeed))
 } 
 
 (() => {

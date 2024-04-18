@@ -8,11 +8,11 @@
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Kanit:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Lato:ital,wght@0,100;0,300;0,400;0,700;0,900;1,100;1,300;1,400;1,700;1,900&display=swap" rel="stylesheet">
     <body>
-        <div id="header-container">
-            <div id="button-container">
+        <div class="header-container">
+            <div class="button-container">
                 <h2>MelonGB</h2>
             
-                <div id="rom-file-input">
+                <div class="rom-file-input">
                     <label for="file-input">Select a ROM:</label>
                     <input type="file" id="file-input" />
                 </div>
@@ -21,16 +21,21 @@
                 <button class="styled-button" id="pause-button">Pause</button>
                 <button class="styled-button" id="restart-button">Restart</button>
                 
-                <div id="volume-slider-container">
+                <div class="slider-container">
                     <label for="volume-slider">Volume</label>
-                    <input type="range" min="0" max="100" value="20" id="volume-slider">
+                    <input type="range" min="0" max="1" step="0.1" value="0" id="volume-slider">
+                </div>
+
+                <div class="slider-container">
+                    <label for="speed-slider">Game Speed</label>
+                    <input type="range" min="0" max="1" step="0.1" value="0" id="speed-slider">
                 </div>
             </div>
 
-            <a id="repo-link" href="https://github.com/gordnzhou/melon-gb" target="_blank">Github Repository</a>
+            <a class="repo-link" href="https://github.com/gordnzhou/melon-gb" target="_blank">Github Repository</a>
         </div>
-        <div id="content-container">
-            <div id="display-container">
+        <div class="content-container">
+            <div class="display-container">
                 <canvas id="gb-display"></canvas>
             </div>
         </div>

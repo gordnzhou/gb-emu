@@ -43,7 +43,7 @@ class GBAudioProcessor extends AudioWorkletProcessor {
   
     process(inputs, outputs, parameters) {
         const output = outputs[0];
-        this.port.postMessage("USE: " + output[0].length);
+        // this.port.postMessage("USE: " + output[0].length);
 
         for (let i = 0; i < output[0].length; ++i) {
             if (this.ringBuffer.isEmpty()) {
