@@ -2,7 +2,7 @@ const DB_NAME = "melon-gb";
 const STORE_NAME = "saves";
 
 window.Persistence = {
-    load_from_db: function(gameId, saveType) {
+    load_from_db: (gameId, saveType) => {
         const request = indexedDB.open(DB_NAME, 2);
 
         request.onupgradeneeded = function(event) {
@@ -12,7 +12,7 @@ window.Persistence = {
             }
         };
 
-        request.onsuccess = function(event) {
+        request.onsuccess = (event) => {
             const db = event.target.result;
 
             const transaction = db.transaction([STORE_NAME], "readonly");
@@ -39,7 +39,7 @@ window.Persistence = {
         };
     },
 
-    save_to_db: function(gameId, saveType, data) {
+    save_to_db: (gameId, saveType, data) => {
         const request = indexedDB.open(DB_NAME, 2);
 
         request.onupgradeneeded = function(event) {

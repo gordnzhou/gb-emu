@@ -1,3 +1,5 @@
+const RING_BUFFER_SIZE = 10 * 4096;
+
 class RingBuffer {
     constructor(length) {
         this.buffer = new Float32Array(length);
@@ -30,11 +32,13 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         super();
         this.sampleRate = options.processorOptions.sampleRate;
         this.prev_sample = 0.0;
-        this.ringBuffer = new RingBuffer(10 * 4096);
+        this.ringBuffer = new RingBuffer(RING_BUFFER_SIZE);
+
         this.port.postMessage("SAMPLE RATE: " + this.sampleRate);
+        
         this.port.onmessage = event => {
             if (event.data === 'clearBuffer') {
-                this.clearBuffer();
+                this.ringBuffer = new RingBuffer(RING_BUFFER_SIZE);
             } else {
                 event.data.forEach(sample => this.ringBuffer.push(sample));
             }
@@ -55,10 +59,6 @@ class GBAudioProcessor extends AudioWorkletProcessor {
         }
     
         return true;
-    }
-
-    clearBuffer() {
-        this.ringBuffer = new RingBuffer(10 * 4096);
     }
 }
   
