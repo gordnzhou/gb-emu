@@ -132,6 +132,14 @@ impl Mbc for Mbc5 {
         assert!(save_type == "ram");
         self.ram = Some(Battery::parse_ram(data));
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_id(&self) -> Option<String> {
+        match &self.battery {
+            Some(battery) => Some(battery.save_id()),
+            None => None,
+        }
+    }
 }
 
 #[cfg(test)]

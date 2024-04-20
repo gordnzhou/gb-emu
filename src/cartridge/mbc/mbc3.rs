@@ -193,4 +193,12 @@ impl Mbc for Mbc3 {
             self.rtc = Some(Battery::parse_rtc(data));
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_id(&self) -> Option<String> {
+        match &self.battery {
+            Some(battery) => Some(battery.save_id()),
+            None => None,
+        }
+    }
 }

@@ -431,4 +431,9 @@ impl Bus {
     pub fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
         self.cartridge.load_save(data, save_type);
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn save_id(&self) -> Option<String> {
+        self.cartridge.save_id()
+    }
 }

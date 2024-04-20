@@ -42,6 +42,9 @@ pub trait Mbc {
 
     #[cfg(target_arch = "wasm32")]
     fn load_save(&mut self, data: Vec<u8>, save_type: &str);
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_id(&self) -> Option<String>;
 }
 
 pub fn make_mbc(rom_bytes: &[u8], header: &Header) -> Box<dyn Mbc> {

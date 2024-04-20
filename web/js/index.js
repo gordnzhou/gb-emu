@@ -1,5 +1,6 @@
 import { Emulator } from "gbemulib";
 import { memory } from "gbemulib/gbemulib_bg.wasm"
+import { exportSaveFromDB, importSaveToDB } from "./persistence";
 
 const DEFAULT_GAME_SPEED = 0.2;
 const DEFAULT_AUDIO_VOLUME = 0.2;
@@ -174,7 +175,7 @@ const GBEmulator = (() => {
     
             let dur = 0;
             while (displayOutputPtr == null) {
-                if (dur % 4 == 0) {
+                if (dur % 2 == 0) {
                     window.emulator.update_joypad(GBInput.getKeyStatus());
                 }
                 
@@ -239,20 +240,54 @@ const GBEmulator = (() => {
     }
 })();
 
-(() => {
+const initializeAutoSave = () => {
+    const SAVE_INTERVAL_MS = 10000;
+    
+    let autoSave = null;
+    const autoSaveToggle = document.getElementById("auto-save-toggle");
+
+    const enableAutoSave = () => {
+        autoSave = setInterval(() => {
+            if (window.emulator != null) {
+                window.emulator.save_game();
+            }
+        }, SAVE_INTERVAL_MS);
+        autoSaveToggle.textContent = "Autosave: Enabled";
+    }
+
+    const disableAutoSave = () => {
+        autoSave = null;
+        autoSaveToggle.textContent = "Autosave: Disabled";
+    }
+
+    autoSaveToggle.addEventListener("click", () => {
+        autoSave == null ? enableAutoSave() : disableAutoSave();
+    });
+
+    enableAutoSave();
+}
+
+const initializeSpeedSlider = () => {
     const speedSlider = document.getElementById('speed-slider');
     speedSlider.value = DEFAULT_GAME_SPEED;
     speedSlider.addEventListener('input', (e) => GBEmulator.setGameSpeed(e.target.value));
+}
 
+const initializeVolumeSlider = () => {
     const volumeSlider = document.getElementById('volume-slider');
     volumeSlider.value = DEFAULT_AUDIO_VOLUME;
     volumeSlider.addEventListener('input', (e) => GBAudio.setAudioVolume(e.target.value));
+}
 
-    document.getElementById('file-input').addEventListener('change', (e) => {
+const initializeButtons = () => {
+    const fileInput = document.getElementById('file-input');
+    fileInput.addEventListener('change', (e) => {
         GBEmulator.setPaused(true);
         GBEmulator.loadRom(e.target.files[0]);
     });
-    
+    document.getElementById("file-input-button").addEventListener('click', () => fileInput.click());
+
+
     document.getElementById("pause-button").addEventListener("click", () => {
         GBEmulator.setPaused(true);
         GBAudio.clearAudio();
@@ -264,8 +299,26 @@ const GBEmulator = (() => {
     
     document.getElementById("restart-button").addEventListener("click", () => {
         GBAudio.clearAudio();
-        GBEmulator.loadRom(document.getElementById('file-input').files[0]);
+        GBEmulator.loadRom(fileInput.files[0]);
     });
 
+    document.getElementById("export-save-button").addEventListener("click", () => {
+        if (window.emulator != null) {
+            exportSaveFromDB(window.emulator.fetch_game_id());
+        }
+    })
+
+    const importSave = document.getElementById('import-save');
+    importSave.addEventListener('change', (e) => {
+        importSaveToDB(e.target.files[0])
+    });
+    document.getElementById('import-save-button').addEventListener('click', () => importSave.click());
+}
+
+(() => {
+    initializeButtons();
+    initializeSpeedSlider();
+    initializeVolumeSlider();
+    initializeAutoSave();
     GBDisplay.clearCanvas();
 })();

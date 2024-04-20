@@ -133,6 +133,11 @@ impl Emulator {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn fetch_game_id(&self) -> Option<String> {
+        self.cpu.save_id()
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn load_save(&mut self, data: Vec<u8>, save_type: &str) {
         self.cpu.load_save(data, save_type);
     }

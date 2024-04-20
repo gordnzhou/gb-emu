@@ -36,6 +36,11 @@ impl Mbc for NoMbc {
     fn load_save(&mut self, _data: Vec<u8>, _save_type: &str) {
         // do nothing
     }
+    
+    #[cfg(target_arch = "wasm32")]
+    fn save_id(&self) -> Option<String> {
+        None
+    }
 }
 
 impl NoMbc {

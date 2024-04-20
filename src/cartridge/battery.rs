@@ -106,33 +106,37 @@ impl Battery {
 
 #[cfg(target_arch = "wasm32")]
 pub struct Battery {
-    store_name: String,
+    save_id: String,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl Battery {
-    pub fn new(store_name: String) -> Self {
+    pub fn new(save_id: String) -> Self {
         Battery { 
-            store_name,
+            save_id,
         }
     }
 
     pub fn save_ram(&self, ram: &Vec<[u8; RAM_BANK_SIZE]>) {
         let ram_flat: Vec<u8> = ram.iter().flatten().copied().collect();
-        save_to_db(&self.store_name, "ram", to_value(&ram_flat).unwrap());
+        save_to_db(&self.save_id, "ram", to_value(&ram_flat).unwrap());
     }
 
     pub fn load_ram(&self) -> Option<Vec<[u8; RAM_BANK_SIZE]>> {
-        load_from_db(&self.store_name, "ram");
+        load_from_db(&self.save_id, "ram");
         None
     }
 
     pub fn save_rtc(&self, rtc: &Rtc) {
-        save_to_db(&self.store_name, "rtc", to_value(&rtc.to_save()).unwrap())
+        save_to_db(&self.save_id, "rtc", to_value(&rtc.to_save()).unwrap())
     }
 
     pub fn load_rtc(&self) -> Option<Rtc> {
-        load_from_db(&self.store_name, "rtc");
+        load_from_db(&self.save_id, "rtc");
         None
+    }
+
+    pub fn save_id(&self) -> String {
+        self.save_id.clone()
     }
 }
