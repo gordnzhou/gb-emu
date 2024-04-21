@@ -1,8 +1,13 @@
 # MelonGB
 
-**MelonGB** is a Gameboy (DMG) and Gameboy Color (CGB) Emulator written in Rust. Jump to [Installation](#installation) if you're interested in trying it out yourself!
+**MelonGB** is a Gameboy (DMG) and Gameboy Color (CGB) Emulator written in Rust. Try out the demo [HERE](https://gordnzhou.github.io/melon-gb/)! Or
+jump to [Installation](#installation) if you're interested in running it locally. 
 
-This emulator is expected to be M-cycle accurate, apart from a few edge cases from some games that I've tested. Jump to [Passings Tests](#passing-tests) for a list of passing test ROMS and future TODOs.
+This emulator is expected to be M-cycle accurate, apart from a few edge cases from some games that I've tested. Jump to [Passings Tests](#passing-tests) for a list of passing test ROMS and future TODOs. Some notable features include:
+- Support for games that use MBC 1,2,3,5
+- Saving/loading data for battery-backed games 
+- Ability to import/export save data
+- In-sync audio emulation for all 4 channels   
 
 ## Screenshots
 |       |  |
